@@ -5,11 +5,11 @@
   "rolePolicy": {
     "profile": "independent-reviewer.v1",
     "declaredRoleKeys": ["game-quality-assurance"],
-    "specializationKeys": ["video-game-development"]
+    "specializationKeys": ["video-game-development", "test-planning", "build-validation", "defect-reproduction", "regression-testing", "compatibility-testing", "accessibility-testing"]
   },
   "id": "com.csweet.video-game-qa",
   "name": "Video Game QA",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
     "type": "dotnet-project",
@@ -23,31 +23,21 @@
   "protocol": { "minimumVersion": "2.0", "maximumVersion": "2.x" },
   "provides": [
     {
-      "name": "video-game.qa.execute.v1",
+      "name": "work.execution.run.v1",
       "description": "Owns test plans, build validation, reproducible defects, regression, compatibility, accessibility checks, and evidence.",
       "inputSchema": {
         "type": "object",
-        "required": ["context", "assignmentRevision", "roleKey", "taskTypeKey", "instructions", "documents", "evidence", "producerOrganizationUserId", "creativeDirectorOrganizationUserId"],
-        "properties": {
-          "context": { "type": "object" },
-          "assignmentRevision": { "type": "integer", "minimum": 1 },
-          "roleKey": { "type": "string" },
-          "taskTypeKey": { "type": "string" },
-          "instructions": { "type": "string", "minLength": 1 },
-          "documents": { "type": "array", "items": { "type": "object" } },
-          "evidence": { "type": "array", "items": { "type": "object" } },
-          "producerOrganizationUserId": { "type": "string", "format": "uuid" },
-          "creativeDirectorOrganizationUserId": { "type": "string", "format": "uuid" }
-        },
-        "additionalProperties": false
+        "required": ["sprintExecutionId", "itemExecutionId", "stageExecutionId", "attemptId", "organizationId", "boardId", "sprintId", "itemId", "assignmentRevision", "boardKey", "itemIdentifier", "policyRevisionId", "stageKey", "traversal", "attempt", "deadline", "instructions", "item", "input", "priorOutcomes", "evidence"],
+        "properties": {},
+        "additionalProperties": true
       },
       "outputSchema": {
         "type": "object",
         "properties": {
           "message": { "type": "string" }
         },
-        "required": ["message"],
-        "additionalProperties": false
+        "required": [],
+        "additionalProperties": true
       },
       "executionTimeoutSeconds": 30,
       "idempotency": "work-item",
@@ -56,7 +46,7 @@
     {
       "name": "agent.configuration.describe.v1",
       "description": "Describe specialist configuration.",
-      "inputSchema": { "type": "object", "additionalProperties": false },
+      "inputSchema": { "type": "object", "additionalProperties": true },
       "outputSchema": { "type": "object", "additionalProperties": true },
       "executionTimeoutSeconds": 30,
       "idempotency": "none",
@@ -76,17 +66,15 @@
     { "name": "platform.llm.chat-stream.v1", "scope": "organization", "purpose": "Produce grounded role-owned deliverables from exact project evidence." },
     { "name": "work.item.read", "scope": "organization", "purpose": "Read only the authoritative assigned board item." },
     { "name": "work.item.comment", "scope": "organization", "purpose": "Record progress, blockers, findings, and evidence on the authoritative item." },
-    { "name": "work.item.start", "scope": "organization", "purpose": "Start typed assigned work." },
-    { "name": "work.item.complete", "scope": "organization", "purpose": "Complete work only after durable evidence exists." },
     { "name": "platform.artifact.read.v1", "scope": "organization", "purpose": "Read authorized exact document revisions and hashes." },
     { "name": "platform.artifact.create.v1", "scope": "organization", "purpose": "Create the role-owned durable deliverable." },
     { "name": "platform.artifact.submit.v1", "scope": "organization", "purpose": "Submit the exact deliverable revision for accountable review." },
-    { "name": "communication.chat.create.v1", "scope": "team", "purpose": "Open contextual direct collaboration with the Producer." },
-    { "name": "communication.message.send.v1", "scope": "team", "purpose": "Report completion or blockers to the Producer in project context." },
+    { "name": "communication.coordination.read.v1", "scope": "team", "purpose": "Read planning, estimation, and sprint-readiness coordination." },
+    { "name": "communication.coordination.respond.v1", "scope": "team", "purpose": "Respond with QA-owned estimates and readiness evidence." },
     { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart." },
     { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item." }
   ],
-  "events": { "subscribes": [] },
+  "events": { "subscribes": ["com.csweet.agent.coordination.turn-requested.v1"] },
   "configuration": [
     { "key": "llmProviderId", "type": "provider", "label": "LLM provider", "required": true, "secret": false },
     { "key": "llmModel", "type": "model", "label": "Model", "required": true, "secret": false, "dependsOnFieldKey": "llmProviderId" }

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 if (args.Contains("--self-test", StringComparer.Ordinal))
 {
     var agent = new SpecialistAgent();
-    if (string.IsNullOrWhiteSpace(agent.AgentId) || agent.Version != "1.0.0" || string.IsNullOrWhiteSpace(agent.PrimaryCapability))
+    if (string.IsNullOrWhiteSpace(agent.AgentId) || agent.Version != "2.1.0" || string.IsNullOrWhiteSpace(agent.PrimaryCapability))
         throw new InvalidOperationException("Specialist identity self-test failed.");
     Console.WriteLine($"{agent.AgentId} {agent.Version} self-test passed.");
     return;
