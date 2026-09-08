@@ -37,7 +37,7 @@ public sealed partial class SpecialistAgent
             if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("Configure an approved QA model.");
             await using var shell = GameQaHarness.CreateShell(path);
             var client = context.CreateChatClient(new AgentLlmSelection(provider, model));
-            var harness = client.AsHarnessAgent(GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null));
+            var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null), token));
             var session = await harness.CreateSessionAsync(token);
             var response = await harness.RunAsync($"Validate commit {workspace.BaseCommitSha}.\nStage instructions: {assignment.Instructions}\n" +
                 $"Approved planning: {JsonSerializer.Serialize(input.Planning)}\nPublished evidence: {JsonSerializer.Serialize(assignment.Evidence)}", session,
