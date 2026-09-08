@@ -8,7 +8,7 @@
     "specializationKeys": ["video-game-development", "test-planning", "build-validation", "defect-reproduction", "regression-testing", "compatibility-testing", "accessibility-testing"]
   },
   "id": "com.csweet.video-game-qa",
-  "name": "Video Game QA",
+  "name": "Rohan Desai",
   "version": "2.1.1",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
@@ -83,6 +83,9 @@
   "webAccess": { "mode": "None", "rules": [] },
   "ui": [],
   "catalog": {
+    "imageUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.QA.VideoGame/main/assets/branding/portrait-v1.jpg",
+    "companyLogoUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.QA.VideoGame/main/assets/branding/csweet-icon.svg",
+    "accentColor": "#B17B2E",
     "summary": "Owns test plans, build validation, reproducible defects, regression, compatibility, accessibility checks, and evidence.",
     "category": "Quality",
     "role": { "key": "game-quality-assurance", "name": "Video Game QA" },
