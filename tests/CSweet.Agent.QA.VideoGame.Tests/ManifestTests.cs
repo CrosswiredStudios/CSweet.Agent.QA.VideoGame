@@ -14,6 +14,13 @@ public sealed class ManifestTests
         var manifest = await AgentManifestLoader.LoadAsync(path, CancellationToken.None);
         var agent = new SpecialistAgent();
 
+        using var json = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        var required = json.RootElement.GetProperty("requires").EnumerateArray().Select(x => x.GetProperty("name").GetString()).ToArray();
+        Assert.Contains(GitWorkspaceCapabilities.Prepare, required);
+        Assert.Contains(GitWorkspaceCapabilities.Inspect, required);
+        Assert.Contains(GitWorkspaceCapabilities.Cleanup, required);
+        Assert.DoesNotContain(GitWorkspaceCapabilities.Publish, required);
+        Assert.DoesNotContain(GitMergeCapabilities.Authorize, required);
         Assert.Equal(agent.AgentId, manifest.Id);
         Assert.Equal(agent.Version, manifest.Version);
         Assert.Contains(agent.PrimaryCapability, manifest.Capabilities);

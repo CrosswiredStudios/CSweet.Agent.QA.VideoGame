@@ -53,7 +53,7 @@ public static class SpecialistAssignmentValidator
             throw new ArgumentException("Assignment revision, traversal, and attempt must be positive.");
         if (assignment.Deadline <= DateTimeOffset.UtcNow)
             throw new ArgumentException("The authoritative execution deadline has expired.");
-        var input = assignment.Input.Deserialize<WorkExecutionInputV1>()
+        var input = assignment.Input.Deserialize<WorkExecutionInputV1>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new ArgumentException("The canonical work execution input is required.");
         if (input.WorkstreamId is null || input.WorkstreamId == Guid.Empty || input.TeamId is null || input.TeamId == Guid.Empty)
             throw new ArgumentException("Canonical workstream and team context are required.");

@@ -4,13 +4,26 @@
   "kind": "agent",
   "rolePolicy": {
     "profile": "independent-reviewer.v1",
-    "declaredRoleKeys": ["game-quality-assurance"],
-    "specializationKeys": ["video-game-development", "test-planning", "build-validation", "defect-reproduction", "regression-testing", "compatibility-testing", "accessibility-testing"]
+    "declaredRoleKeys": [
+      "game-quality-assurance"
+    ],
+    "specializationKeys": [
+      "video-game-development",
+      "test-planning",
+      "build-validation",
+      "defect-reproduction",
+      "regression-testing",
+      "compatibility-testing",
+      "accessibility-testing"
+    ]
   },
   "id": "com.csweet.video-game-qa",
   "name": "Rohan Desai",
-  "version": "2.1.1",
-  "publisher": { "id": "com.csweet", "name": "C-Sweet" },
+  "version": "2.2.0",
+  "publisher": {
+    "id": "com.csweet",
+    "name": "C-Sweet"
+  },
   "runtime": {
     "type": "dotnet-project",
     "projectPath": "src/CSweet.Agent.QA.VideoGame/CSweet.Agent.QA.VideoGame.csproj",
@@ -18,36 +31,71 @@
     "defaultActivationMode": "OnDemand",
     "defaultTickFrequencySeconds": 300,
     "supportsMultipleInstallations": true,
-    "maximumConcurrentJobs": 1
+    "maximumConcurrentJobs": 1,
+    "environmentProfile": "software-development-polyglot-v1",
+    "workspaceAccess": "ReadWrite"
   },
-  "protocol": { "minimumVersion": "2.0", "maximumVersion": "2.x" },
+  "protocol": {
+    "minimumVersion": "2.0",
+    "maximumVersion": "2.x"
+  },
   "provides": [
     {
       "name": "work.execution.run.v1",
       "description": "Owns test plans, build validation, reproducible defects, regression, compatibility, accessibility checks, and evidence.",
       "inputSchema": {
         "type": "object",
-        "required": ["sprintExecutionId", "itemExecutionId", "stageExecutionId", "attemptId", "organizationId", "boardId", "sprintId", "itemId", "assignmentRevision", "boardKey", "itemIdentifier", "policyRevisionId", "stageKey", "traversal", "attempt", "deadline", "instructions", "item", "input", "priorOutcomes", "evidence"],
+        "required": [
+          "sprintExecutionId",
+          "itemExecutionId",
+          "stageExecutionId",
+          "attemptId",
+          "organizationId",
+          "boardId",
+          "sprintId",
+          "itemId",
+          "assignmentRevision",
+          "boardKey",
+          "itemIdentifier",
+          "policyRevisionId",
+          "stageKey",
+          "traversal",
+          "attempt",
+          "deadline",
+          "instructions",
+          "item",
+          "input",
+          "priorOutcomes",
+          "evidence"
+        ],
         "properties": {},
         "additionalProperties": true
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "message": { "type": "string" }
+          "message": {
+            "type": "string"
+          }
         },
         "required": [],
         "additionalProperties": true
       },
-      "executionTimeoutSeconds": 30,
+      "executionTimeoutSeconds": 3600,
       "idempotency": "work-item",
-      "riskClass": "standard"
+      "riskClass": "elevated"
     },
     {
       "name": "agent.configuration.describe.v1",
       "description": "Describe specialist configuration.",
-      "inputSchema": { "type": "object", "additionalProperties": true },
-      "outputSchema": { "type": "object", "additionalProperties": true },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
       "executionTimeoutSeconds": 30,
       "idempotency": "none",
       "riskClass": "standard"
@@ -55,32 +103,113 @@
     {
       "name": "agent.configuration.update.v1",
       "description": "Update specialist configuration.",
-      "inputSchema": { "type": "object", "additionalProperties": true },
-      "outputSchema": { "type": "object", "additionalProperties": true },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
       "executionTimeoutSeconds": 30,
       "idempotency": "work-item",
       "riskClass": "standard"
     }
   ],
   "requires": [
-    { "name": "platform.llm.chat-stream.v1", "scope": "organization", "purpose": "Produce grounded role-owned deliverables from exact project evidence." },
-    { "name": "work.item.read", "scope": "organization", "purpose": "Read only the authoritative assigned board item." },
-    { "name": "work.item.comment", "scope": "organization", "purpose": "Record progress, blockers, findings, and evidence on the authoritative item." },
-    { "name": "platform.artifact.read.v1", "scope": "organization", "purpose": "Read authorized exact document revisions and hashes." },
-    { "name": "platform.artifact.create.v1", "scope": "organization", "purpose": "Create the role-owned durable deliverable." },
-    { "name": "platform.artifact.submit.v1", "scope": "organization", "purpose": "Submit the exact deliverable revision for accountable review." },
-    { "name": "communication.coordination.read.v1", "scope": "team", "purpose": "Read planning, estimation, and sprint-readiness coordination." },
-    { "name": "communication.coordination.respond.v1", "scope": "team", "purpose": "Respond with QA-owned estimates and readiness evidence." },
-    { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart." },
-    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item." }
+    {
+      "name": "platform.llm.chat-stream.v1",
+      "scope": "organization",
+      "purpose": "Produce grounded role-owned deliverables from exact project evidence."
+    },
+    {
+      "name": "work.item.read",
+      "scope": "organization",
+      "purpose": "Read only the authoritative assigned board item."
+    },
+    {
+      "name": "work.item.comment",
+      "scope": "organization",
+      "purpose": "Record progress, blockers, findings, and evidence on the authoritative item."
+    },
+    {
+      "name": "platform.artifact.read.v1",
+      "scope": "organization",
+      "purpose": "Read authorized exact document revisions and hashes."
+    },
+    {
+      "name": "platform.artifact.create.v1",
+      "scope": "organization",
+      "purpose": "Create the role-owned durable deliverable."
+    },
+    {
+      "name": "platform.artifact.submit.v1",
+      "scope": "organization",
+      "purpose": "Submit the exact deliverable revision for accountable review."
+    },
+    {
+      "name": "communication.coordination.read.v1",
+      "scope": "team",
+      "purpose": "Read planning, estimation, and sprint-readiness coordination."
+    },
+    {
+      "name": "communication.coordination.respond.v1",
+      "scope": "team",
+      "purpose": "Respond with QA-owned estimates and readiness evidence."
+    },
+    {
+      "name": "platform.agent-operating-state.read.v1",
+      "scope": "organization",
+      "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart."
+    },
+    {
+      "name": "platform.agent-operating-state.write.v1",
+      "scope": "organization",
+      "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item."
+    },
+    {
+      "name": "git.workspace.prepare.v2",
+      "scope": "work-item",
+      "purpose": "Test the exact platform-pinned source publication and collect independent validation evidence."
+    },
+    {
+      "name": "git.workspace.inspect.v2",
+      "scope": "work-item",
+      "purpose": "Test the exact platform-pinned source publication and collect independent validation evidence."
+    },
+    {
+      "name": "git.workspace.cleanup.v2",
+      "scope": "work-item",
+      "purpose": "Test the exact platform-pinned source publication and collect independent validation evidence."
+    }
   ],
-  "events": { "subscribes": ["com.csweet.agent.coordination.turn-requested.v1"] },
+  "events": {
+    "subscribes": [
+      "com.csweet.agent.coordination.turn-requested.v1"
+    ]
+  },
   "configuration": [
-    { "key": "llmProviderId", "type": "provider", "label": "LLM provider", "required": true, "secret": false },
-    { "key": "llmModel", "type": "model", "label": "Model", "required": true, "secret": false, "dependsOnFieldKey": "llmProviderId" }
+    {
+      "key": "llmProviderId",
+      "type": "provider",
+      "label": "LLM provider",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "llmModel",
+      "type": "model",
+      "label": "Model",
+      "required": true,
+      "secret": false,
+      "dependsOnFieldKey": "llmProviderId"
+    }
   ],
   "credentials": [],
-  "webAccess": { "mode": "None", "rules": [] },
+  "webAccess": {
+    "mode": "None",
+    "rules": []
+  },
   "ui": [],
   "catalog": {
     "imageUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.QA.VideoGame/main/assets/branding/portrait-v1.jpg",
@@ -88,8 +217,13 @@
     "accentColor": "#B17B2E",
     "summary": "Owns test plans, build validation, reproducible defects, regression, compatibility, accessibility checks, and evidence.",
     "category": "Quality",
-    "role": { "key": "game-quality-assurance", "name": "Video Game QA" },
-    "license": { "spdxId": "MIT" },
+    "role": {
+      "key": "game-quality-assurance",
+      "name": "Video Game QA"
+    },
+    "license": {
+      "spdxId": "MIT"
+    },
     "iconUrls": [],
     "roleAliases": [],
     "keywords": [],
