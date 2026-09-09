@@ -412,3 +412,8 @@ FodyWeavers.xsd
 ## C-Sweet agent workspace additions
 /.artifacts/
 /.tmp/
+
+# Agent release notes are source documentation.
+!/releases/
+/releases/*
+!/releases/*.md
