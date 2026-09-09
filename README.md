@@ -27,7 +27,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.27.0 and the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.40.0 and the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -36,7 +36,7 @@ Game-specific payload helpers and decision logic live in the bundled `extensions
 
 ## Exact-source QA execution (2.2.0)
 
-The quality stage now runs a coding/test harness in the platform-pinned publication workspace and returns passed/failed with exact commit evidence. It requires executed test results and rejects contradictory passing verdicts or tracked-source edits. Other QA planning work retains document delivery. The manifest requests the polyglot environment, writable test workspace, prepare/inspect/cleanup only, and a one-hour execution budget. It requests no Git publish or merge authority. SDK 3.31.1 is pinned. End-to-end profile routing and live execution are still required; package tests alone do not prove a tested game.
+The quality stage now runs a coding/test harness in the platform-pinned publication workspace and returns passed/failed with exact commit evidence. It requires executed test results and rejects contradictory passing verdicts or tracked-source edits. Other QA planning work retains document delivery. The manifest requests the polyglot environment, writable test workspace, prepare/inspect/cleanup only, and a one-hour execution budget. It requests no Git publish or merge authority. SDK 3.40.0 is pinned. End-to-end profile routing and live execution are still required; package tests alone do not prove a tested game.
 
 ## Release notes
 
