@@ -19,7 +19,7 @@
   },
   "id": "com.csweet.video-game-qa",
   "name": "Rohan Desai",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -136,6 +136,16 @@
       "name": "work.item.comment",
       "scope": "organization",
       "purpose": "Record progress, blockers, findings, and evidence on the authoritative item."
+    },
+    {
+      "name": "work.item.comment.update.v1",
+      "scope": "organization",
+      "purpose": "Correct this agent's own comment on the authoritative item."
+    },
+    {
+      "name": "work.item.comment.delete.v1",
+      "scope": "organization",
+      "purpose": "Retract this agent's own comment while its activity history is retained."
     },
     {
       "name": "platform.artifact.read.v1",
