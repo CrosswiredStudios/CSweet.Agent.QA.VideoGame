@@ -49,8 +49,8 @@ public static class SpecialistAssignmentValidator
             assignment.OrganizationId == Guid.Empty || assignment.BoardId == Guid.Empty ||
             assignment.SprintId == Guid.Empty || assignment.ItemId == Guid.Empty)
             throw new ArgumentException("Execution requires authoritative sprint, item, stage, attempt, organization, and board identity.");
-        if (assignment.AssignmentRevision < 1 || assignment.Traversal < 1 || assignment.Attempt < 1)
-            throw new ArgumentException("Assignment revision, traversal, and attempt must be positive.");
+        if (assignment.AssignmentRevision < 1 || assignment.Traversal < 0 || assignment.Attempt < 1)
+            throw new ArgumentException("Assignment revision and attempt must be positive; traversal must be nonnegative.");
         if (assignment.Deadline <= DateTimeOffset.UtcNow)
             throw new ArgumentException("The authoritative execution deadline has expired.");
         var input = assignment.Input.Deserialize<WorkExecutionInputV1>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
