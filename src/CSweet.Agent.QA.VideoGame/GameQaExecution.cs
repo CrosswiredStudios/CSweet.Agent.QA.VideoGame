@@ -36,10 +36,9 @@ public sealed partial class SpecialistAgent
                 return AgentWorkResult.Success(await SaveStandaloneQaAsync(assignment, input, savedReport, stateKey, context, token));
             var workspace = await context.Platform.Git.PrepareAsync(new PrepareGitWorkspaceRequest(assignment.ItemId,
                 assignment.AssignmentRevision, $"game-qa:{assignment.AttemptId:N}:prepare"), token);
-            var path = Path.GetFullPath(workspace.Path);
-            if (!path.StartsWith(Path.GetFullPath("/workspace") + Path.DirectorySeparatorChar, StringComparison.Ordinal) || !Directory.Exists(path))
-                throw new InvalidOperationException("The platform returned an unavailable QA workspace.");
-            GameQaExecution.RequireCommit(workspace.BaseCommitSha);
+            var prepared = await GameQaWorkspace.MaterializeAsync(workspace, assignment.ItemId, assignment.AssignmentRevision, context, token);
+            workspace = prepared.Workspace;
+            var path = workspace.Path;
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure an approved QA provider.");
             var model = Settings.GetString("llmModel");
             if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("Configure an approved QA model.");
@@ -59,6 +58,7 @@ public sealed partial class SpecialistAgent
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
             var verdict = GameQaExecution.ValidateOutcome(outcome, workspace.BaseCommitSha);
             if (standalone) GameQaExecution.ValidateCriterionCoverage(outcome!, input.Planning!.AcceptanceCriteria);
+            await prepared.VerifySourceUnchangedAsync(token);
             var inspection = await context.Platform.Git.InspectAsync(new InspectGitWorkspaceRequest(workspace.WorkspaceId, assignment.AssignmentRevision), token);
             if (inspection.HasTrackedChanges) throw new InvalidOperationException("QA changed tracked source; restore the exact tested revision before validation.");
             var completedOutcome = new WorkExecutionOutcomeV1(assignment.StageExecutionId, assignment.AttemptId,

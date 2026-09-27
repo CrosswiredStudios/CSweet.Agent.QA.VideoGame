@@ -24,6 +24,8 @@ public sealed class ManifestTests
         var required = json.RootElement.GetProperty("requires").EnumerateArray().Select(x => x.GetProperty("name").GetString()).ToArray();
         Assert.Contains(GitWorkspaceCapabilities.Prepare, required);
         Assert.Contains(GitWorkspaceCapabilities.Inspect, required);
+        Assert.Contains(PlatformGitWorkspaceClient.SyncCapability, required);
+        Assert.False(json.RootElement.GetProperty("requires").EnumerateArray().Single(x => x.GetProperty("name").GetString() == PlatformGitWorkspaceClient.SyncCapability).GetProperty("modelVisible").GetBoolean());
         Assert.Contains(GitWorkspaceCapabilities.Cleanup, required);
         Assert.DoesNotContain(GitWorkspaceCapabilities.Publish, required);
         Assert.DoesNotContain(GitMergeCapabilities.Authorize, required);

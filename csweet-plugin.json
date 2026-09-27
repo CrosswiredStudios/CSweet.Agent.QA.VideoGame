@@ -19,7 +19,7 @@
   },
   "id": "com.csweet.video-game-qa",
   "name": "Rohan Desai",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -186,6 +186,12 @@
       "name": "git.workspace.prepare.v2",
       "scope": "work-item",
       "purpose": "Test the exact platform-pinned source publication and collect independent validation evidence."
+    },
+    {
+      "name": "git.workspace.sync.v1",
+      "modelVisible": false,
+      "scope": "work-item",
+      "purpose": "Download the authorized exact-revision source snapshot into the isolated QA runtime; never upload or publish source."
     },
     {
       "name": "git.workspace.inspect.v2",

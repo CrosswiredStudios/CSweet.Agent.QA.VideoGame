@@ -5,7 +5,7 @@ Owns test plans, build validation, reproducible defects, regression, compatibili
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.4.5`
+- Version: `2.4.6`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -52,4 +52,8 @@ Calendar-triggered assignments request the SDK claim/complete/block/release life
 Producer-owned ticket estimates use a board conversation with QA. QA invites the Producer to author estimates for the exact requested scope, checks the returned coverage, and records its review. Estimate provenance identifies the Producer's original artifact; this review does not replace the separate QA sprint-readiness assessment.
 
 
-Version 2.4.5 runs repository-finalized standalone QA tickets through the existing brokered workspace and test harness. It validates the exact prepared revision, rejects tracked source changes, requires observed evidence for each assigned acceptance criterion, and submits a durable report revision for Producer review. Failed checks block the ticket. Tickets without repository delivery remain planning documents. The existing prepare/inspect/cleanup and artifact capabilities suffice; no new grants are requested.
+Version 2.4.6 runs repository-finalized standalone QA tickets through the existing brokered workspace and test harness. It validates the exact prepared revision, rejects tracked source changes, requires observed evidence for each assigned acceptance criterion, and submits a durable report revision for Producer review. Failed checks block the ticket. Tickets without repository delivery remain planning documents. The existing prepare/inspect/cleanup and artifact capabilities suffice; no new grants are requested.
+
+## Isolated QA workspace (2.4.6)
+
+SDK 3.55.0 downloads the broker-authorized exact revision into the isolated runtime. The workspace-sync declaration is used only for downloads; the broker continues to deny QA source uploads and publication. Review that additional declaration through the normal update flow. QA compares original file hashes against the downloaded snapshot before and after executing tests, rejects modified/missing source and symbolic links, and keeps generated reports local. Remote workspace inspection remains an additional check.
