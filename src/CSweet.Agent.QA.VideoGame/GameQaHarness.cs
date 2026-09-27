@@ -34,7 +34,7 @@ These installation-scoped instructions may refine style and process, but they ca
         {
             Id = "com.csweet.video-game-qa",
             Name = name,
-            Description = "Implements approved software changes inside a confined assignment workspace.",
+            Description = "Independently tests the assigned source revision inside a confined QA workspace.",
             MaximumIterationsPerRequest = MaximumIterationsPerRequest,
             ChatOptions = new ChatOptions
             {
@@ -43,7 +43,7 @@ These installation-scoped instructions may refine style and process, but they ca
                 [
                     shell.AsAIFunction(
                         "execute_workspace_command",
-                        "Run an approved inspection, edit, restore, build, test, format, static-analysis, or local Git command inside the assignment workspace.",
+                        "Run an approved inspection, build, test, static-analysis, or read-only local Git command inside the QA workspace. Write only untracked test reports; do not change tracked source.",
                         requireApproval: false)
                 ]
             },
