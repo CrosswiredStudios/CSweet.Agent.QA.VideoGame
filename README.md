@@ -5,7 +5,7 @@ Owns test plans, build validation, reproducible defects, regression, compatibili
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.4.8`
+- Version: `2.5.0`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -65,3 +65,17 @@ The local `submit_qa_report` tool records evidence at the fixed `.csweet/qa-outc
 ## Report argument compatibility (2.4.8)
 
 The report tool now exposes flat named arguments and accepts a single JSON encoding layer for booleans and arrays from model tool parsers. The previous nested object remains compatible. Invalid arguments or evidence return specific feedback with the assigned criteria; corrections must preserve actual results. Regression coverage exercises the live payload format through the complete harness on Windows and Linux. Exact commit, criterion coverage, verdict consistency and source-integrity checks still gate acceptance.
+
+## Snapshot provenance context (2.4.9)
+
+QA receives the broker-authorized workspace and commit identity plus the number of original files verified before its run. Downloaded snapshots intentionally omit `.git`; independent source-hash and broker checks establish source integrity. The model must still execute relevant tests and assess every criterion. Snapshot identity does not establish branch membership, merge completion or passing measurements.
+
+## Blocked for a decision, not failed back to engineering (2.5.0)
+
+A human QA lead does not send a build back to the developer because the test lab lacks a device. Each criterion in the QA report may now set `unverifiable=true` (always with `satisfied=false`). This means the evidence needs a device, browser, network, registry, service or tool that is unavailable here, as opposed to a defect or evidence the engineer could have produced.
+
+- Any failing command, ordinary unmet criterion, or finding still returns `failed`, which routes the candidate back to engineering. Findings are reserved for defects; a check that can't be performed here is recorded only as an unverifiable criterion.
+- If every command passes and the only gaps are unverifiable criteria, QA returns **Blocked** with diagnostic `decision-required:v1`. The summary names each unverifiable criterion, what is missing, and the options: defer or amend the criterion, or provide the environment. The platform and Producer route this to a decision maker, and QA is retried on the same candidate once it is resolved.
+- The report renders these checks as "not verifiable in this environment", never as passed.
+
+This release includes the unreleased 2.4.9 snapshot-provenance changes. There are no new grants or network access.

@@ -30,6 +30,8 @@ public sealed partial class SpecialistAgent
         GameQaExecution.ValidateCriterionCoverage(outcome, input.Planning!.AcceptanceCriteria);
         var verdict = GameQaExecution.ValidateOutcome(outcome, outcome.SourceCommitSha);
         var evidence = new WorkExecutionEvidence("commit", "Independently tested source", outcome.SourceCommitSha);
+        if (GameQaExecution.RequiresDecision(outcome))
+            return GameQaExecution.DecisionOutcome(assignment, outcome);
         if (verdict != "passed")
         {
             var findings = outcome.Findings.Concat(outcome.Criteria.Where(x => !x.Satisfied).Select(x => x.Criterion + ": " + x.Evidence)).ToArray();
@@ -79,12 +81,14 @@ internal static partial class GameQaExecution
             !criteria.Order(StringComparer.Ordinal).SequenceEqual(outcome.Criteria.Select(x => x.Criterion).Order(StringComparer.Ordinal)) ||
             outcome.Passed && outcome.Criteria.Any(x => !x.Satisfied))
             throw new InvalidOperationException("QA must report every exact acceptance criterion with observed evidence; missing or failed criteria cannot pass.");
+        if (outcome.Criteria.Any(x => x.Unverifiable && x.Satisfied))
+            throw new InvalidOperationException("An unverifiable criterion cannot also be satisfied; report it as satisfied=false with the missing environment.");
     }
 
     internal static string RenderReport(GameQaOutcome outcome) =>
         "# Independent QA execution report\n\n## Build Under Test\n\nExact tested commit: `" + outcome.SourceCommitSha + "`\n\n" +
         "## Test Strategy\n\nIndependent execution against the assigned delivery criteria.\n\n" +
-        "## Test Cases\n\n" + string.Join("\n\n", outcome.Criteria.Select(x => $"- {x.Criterion}\n  Result: {(x.Satisfied ? "passed" : "failed")}. Evidence: {x.Evidence}")) +
+        "## Test Cases\n\n" + string.Join("\n\n", outcome.Criteria.Select(x => $"- {x.Criterion}\n  Result: {(x.Satisfied ? "passed" : x.Unverifiable ? "not verifiable in this environment" : "failed")}. Evidence: {x.Evidence}")) +
         "\n\n## Executed Commands\n\n" + JsonSerializer.Serialize(outcome.Validations, new JsonSerializerOptions { WriteIndented = true }) +
         "\n\n## Compatibility and Accessibility\n\nSee the criterion-specific observed evidence above; untested environments are not implied to pass.\n\n" +
         "## Defects\n\n" + (outcome.Findings.Count == 0 ? "No unresolved findings were reported by this execution." : string.Join("\n", outcome.Findings)) +

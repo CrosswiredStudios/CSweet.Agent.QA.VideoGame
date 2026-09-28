@@ -22,7 +22,7 @@ internal static class GameQaReport
                 return new Submission(true, "saved", "QA report saved. Source-integrity checks and delivery gates still apply.");
             },
             "submit_qa_report",
-            "Save the final independent QA report for the assigned commit. Supply sourceCommitSha, summary, passed, validations, findings and criteria directly as named arguments. Include every exact acceptance criterion and actual command results. Unmet criteria must not pass. This writes only the designated report, never source files."), commit, requiredCriteria);
+            "Save the final independent QA report for the assigned commit. Supply sourceCommitSha, summary, passed, validations, findings and criteria directly as named arguments. Include every exact acceptance criterion and actual command results. Unmet criteria must not pass. Set a criterion's unverifiable=true (with satisfied=false) only when its evidence needs a device, browser, network, registry, service or tool unavailable here; defects are never unverifiable. This writes only the designated report, never source files."), commit, requiredCriteria);
 
     internal sealed record Submission(bool Saved, string Code, string Message, IReadOnlyList<string>? RequiredCriteria = null);
 
