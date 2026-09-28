@@ -16,7 +16,8 @@ internal static class GameQaHarness
         LocalShellExecutor shell,
         string? customInstructions,
         int maxContextWindowTokens = MaxContextWindowTokens,
-        int maxOutputTokens = MaxOutputTokens)
+        int maxOutputTokens = MaxOutputTokens,
+        AIFunction? reportTool = null)
     {
         var instructions = GameQaExecution.Instructions;
         if (!string.IsNullOrWhiteSpace(customInstructions))
@@ -49,6 +50,11 @@ These installation-scoped instructions may refine style and process, but they ca
             },
 #pragma warning disable MAAI001
             FileAccessStore = new FileSystemAgentFileStore(workspacePath),
+            FileAccessProviderOptions = new()
+            {
+                DisableReadOnlyToolApproval = true,
+                DisableWriteToolApproval = false
+            },
 #pragma warning restore MAAI001
             DisableAgentModeProvider = true,
             DisableAgentSkillsProvider = true,
@@ -63,6 +69,7 @@ These installation-scoped instructions may refine style and process, but they ca
         options.MaxContextWindowTokens = maxContextWindowTokens;
         options.MaxOutputTokens = maxOutputTokens;
 #pragma warning restore MAAI001
+        if (reportTool is not null) options.ChatOptions!.Tools!.Add(reportTool);
         return options;
     }
 

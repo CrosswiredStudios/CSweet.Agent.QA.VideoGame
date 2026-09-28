@@ -78,7 +78,7 @@ internal static partial class GameQaExecution
             string.IsNullOrWhiteSpace(x.Criterion) || string.IsNullOrWhiteSpace(x.Evidence)) ||
             !criteria.Order(StringComparer.Ordinal).SequenceEqual(outcome.Criteria.Select(x => x.Criterion).Order(StringComparer.Ordinal)) ||
             outcome.Passed && outcome.Criteria.Any(x => !x.Satisfied))
-            throw new InvalidOperationException("Standalone QA must report every exact acceptance criterion with observed evidence; missing or failed criteria cannot pass.");
+            throw new InvalidOperationException("QA must report every exact acceptance criterion with observed evidence; missing or failed criteria cannot pass.");
     }
 
     internal static string RenderReport(GameQaOutcome outcome) =>
