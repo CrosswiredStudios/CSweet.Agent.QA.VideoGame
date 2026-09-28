@@ -5,7 +5,7 @@ Owns test plans, build validation, reproducible defects, regression, compatibili
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.4.7`
+- Version: `2.4.8`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -61,3 +61,7 @@ SDK 3.55.0 downloads the broker-authorized exact revision into the isolated runt
 ## Reliable QA report submission (2.4.7)
 
 The local `submit_qa_report` tool records evidence at the fixed `.csweet/qa-outcome.json` path after checking the assigned commit, actual validation commands, verdict consistency, and complete criterion coverage. It treats report strings as data rather than shell commands. Confined reads do not request unattended approval; generic file writes are still not automatically approved. Source integrity is independently checked after validation. Missing reports and pending tool approvals produce specific blockers. No new platform grants are requested, and absent measurements are never treated as passing evidence.
+
+## Report argument compatibility (2.4.8)
+
+The report tool now exposes flat named arguments and accepts a single JSON encoding layer for booleans and arrays from model tool parsers. The previous nested object remains compatible. Invalid arguments or evidence return specific feedback with the assigned criteria; corrections must preserve actual results. Regression coverage exercises the live payload format through the complete harness on Windows and Linux. Exact commit, criterion coverage, verdict consistency and source-integrity checks still gate acceptance.

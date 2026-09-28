@@ -77,7 +77,8 @@ public sealed partial class SpecialistAgent
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            var reason = exception is InvalidOperationException ? exception.Message : "QA could not complete exact-source validation; inspect retained workspace diagnostics.";
+            var reason = exception is InvalidOperationException ? exception.Message :
+                $"QA could not complete exact-source validation ({exception.GetType().Name}); no validation verdict was accepted.";
             return AgentWorkResult.Success(new WorkExecutionOutcomeV1(assignment.StageExecutionId, assignment.AttemptId,
                 WorkExecutionDispositions.Blocked, "blocked", reason, JsonSerializer.SerializeToElement(new { }), [], [reason]));
         }

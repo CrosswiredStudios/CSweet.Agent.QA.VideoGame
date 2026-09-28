@@ -1,4 +1,7 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Agents.AI;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace CSweet.Agent.QA.VideoGame.Tests;
 
@@ -10,6 +13,89 @@ public sealed class GameQaReportTests : IDisposable
         [new("python3 tools/static_validate.py", true, 0, "24 checks passed")], passed ? [] : ["Desktop fps measurement is missing"])
         { Criteria = [new("Record desktop fps", passed, "No browser available; no fps number claimed")] };
 
+    [Theory]
+    [InlineData("nested")]
+    [InlineData("flat")]
+    [InlineData("encoded")]
+    [InlineData("repair")]
+    public async Task ReportSubmissionWorksThroughTheActualHarness(string format)
+    {
+        Directory.CreateDirectory(root);
+        await using var shell = GameQaHarness.CreateShell(root);
+        using var client = new ReportClient(format);
+        var harness = client.AsHarnessAgent(GameQaHarness.CreateOptions("QA", root, shell, null,
+            reportTool: GameQaReport.CreateTool(root, Sha, ["Record desktop fps"])));
+        var session = await harness.CreateSessionAsync();
+        var response = await harness.RunAsync("Submit the actual QA evidence.", session);
+        Assert.DoesNotContain(response.Messages.SelectMany(x => x.Contents), x => x is ToolApprovalRequestContent);
+        Assert.False((await GameQaReport.ReadAsync(root, default)).Passed);
+    }
+
+    private sealed class ReportClient(string format) : IChatClient
+    {
+        private int calls;
+        public void Dispose() { }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            await GetStreamingResponseAsync(messages, options, cancellationToken).ToChatResponseAsync(cancellationToken);
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            foreach (var result in messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>())
+                Assert.DoesNotContain("Error", result.Result?.ToString() ?? "", StringComparison.OrdinalIgnoreCase);
+            calls++;
+            if (calls == 1 || format == "repair" && calls == 2)
+            {
+                var arguments = WireArguments(format == "repair" ? "encoded" : format);
+                if (format == "repair" && calls == 1) arguments["criteria"] = "[]";
+                if (format == "repair" && calls == 2)
+                {
+                    var feedback = messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>().Last();
+                    Assert.Contains("report.invalid-evidence", JsonSerializer.Serialize(feedback.Result));
+                    Assert.Contains("Record desktop fps", JsonSerializer.Serialize(feedback.Result));
+                }
+                yield return new(ChatRole.Assistant, [new FunctionCallContent("report-" + calls, "submit_qa_report", arguments)]);
+            }
+            else yield return new(ChatRole.Assistant, "QA report submitted.");
+        }
+    }
+
+    private static AIFunctionArguments WireArguments(string format)
+    {
+        var report = JsonSerializer.SerializeToElement(Report(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        if (format == "nested") return new() { ["report"] = report };
+        return new(report.EnumerateObject().ToDictionary(x => x.Name, x => format == "encoded"
+            ? (object?)(x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() : x.Value.GetRawText())
+            : x.Value.Clone()));
+    }
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("1")]
+    [InlineData("null")]
+    [InlineData("\"false\"")]
+    public async Task InvalidBooleanEncodingCannotBecomeAPassingVerdict(string invalid)
+    {
+        Directory.CreateDirectory(root);
+        var arguments = WireArguments("encoded");
+        arguments["passed"] = invalid;
+        var result = Assert.IsType<GameQaReport.Submission>(await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(arguments));
+        Assert.False(result.Saved);
+        Assert.Equal("report.invalid-arguments", result.Code);
+        Assert.False(File.Exists(Path.Combine(root, ".csweet", "qa-outcome.json")));
+    }
+
+    [Fact]
+    public async Task EncodedFailedReportPreservesEveryFindingAndCommand()
+    {
+        Directory.CreateDirectory(root);
+        await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(WireArguments("encoded"));
+        var saved = await GameQaReport.ReadAsync(root, default);
+        Assert.Equal(JsonSerializer.Serialize(Report()), JsonSerializer.Serialize(saved));
+    }
+
     [Fact]
     public async Task ToolSavesNegativeVerdictAndLiteralShellTextWithoutExecutingIt()
     {
@@ -18,8 +104,11 @@ public sealed class GameQaReportTests : IDisposable
         await File.WriteAllTextAsync(source, "original source");
         var report = Report() with { Findings = ["Do not run sudo; git push; $(touch sentinel); /proc is unavailable"] };
         var tool = GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]);
-        Assert.Contains("report", tool.JsonSchema.ToString());
-        await tool.InvokeAsync(new AIFunctionArguments { ["report"] = report });
+        Assert.True(tool.JsonSchema.GetProperty("properties").TryGetProperty("sourceCommitSha", out _));
+        Assert.False(tool.JsonSchema.GetProperty("properties").TryGetProperty("report", out _));
+        // Model tool arguments arrive as JSON, not preconstructed CLR records.
+        await tool.InvokeAsync(new AIFunctionArguments { ["report"] = System.Text.Json.JsonSerializer.SerializeToElement(
+            report, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) });
         var saved = await GameQaReport.ReadAsync(root, default);
         Assert.False(saved.Passed);
         Assert.Equal(report.Findings, saved.Findings);
@@ -41,9 +130,12 @@ public sealed class GameQaReportTests : IDisposable
             "coverage" => Report() with { Criteria = [] },
             _ => Report() with { Passed = true }
         };
-        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"])
-                .InvokeAsync(new AIFunctionArguments { ["report"] = report }));
+        var result = await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"])
+            .InvokeAsync(new AIFunctionArguments { ["report"] = report });
+        var error = Assert.IsType<GameQaReport.Submission>(result);
+        Assert.False(error.Saved);
+        Assert.Equal("report.invalid-evidence", error.Code);
+        Assert.Equal(new[] { "Record desktop fps" }, error.RequiredCriteria);
         Assert.False(File.Exists(Path.Combine(root, ".csweet", "qa-outcome.json")));
     }
 
