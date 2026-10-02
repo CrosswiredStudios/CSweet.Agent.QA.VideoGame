@@ -5,7 +5,7 @@ Owns test plans, build validation, reproducible defects, regression, compatibili
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.5.0`
+- Version: `2.5.1`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none
