@@ -2,10 +2,15 @@
 
 Owns test plans, build validation, reproducible defects, regression, compatibility, accessibility checks, and evidence.
 
+Quality stages accept the Producer's canonical workflow assignment even when the
+original approved plan delegates only implementation. Standalone specialist QA
+still requires its planning delegation. Exact-source, eligibility and executed-test
+evidence remain mandatory; assignment recovery does not imply a passing verdict.
+
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.5.1`
+- Version: `2.5.2`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none

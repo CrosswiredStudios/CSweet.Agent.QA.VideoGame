@@ -62,7 +62,17 @@ public static class SpecialistAssignmentValidator
             throw new ArgumentException("An authoritative planning revision is required.");
         var owner = input.Planning.DelegationRecommendations.SingleOrDefault(x =>
             string.Equals(x.StageKey, assignment.StageKey, StringComparison.Ordinal));
-        if (owner is null || !string.Equals(owner.RequiredRoleKey, expectedRoleKey, StringComparison.Ordinal))
+        // Planning recommendations describe the specialist deliverable. The Producer
+        // staffs downstream review from the workflow without rewriting approved planning.
+        // The host's exact assignment requirements and selection evidence below are
+        // authoritative for these fixed review roles.
+        var workflowRole = assignment.StageKey switch
+        {
+            "technical-review" or "merge-decision" => "game-technical-director",
+            "quality" => "game-quality-assurance",
+            _ => null
+        };
+        if (!string.Equals(workflowRole ?? owner?.RequiredRoleKey, expectedRoleKey, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("The assignment is not owned by this specialist role.");
         var requirements = input.AssignmentRequirements
             ?? throw new ArgumentException("Canonical role, skill, and capability requirements are required.");
