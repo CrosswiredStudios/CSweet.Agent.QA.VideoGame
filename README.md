@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.5.2`
+- Version: `2.6.0`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -84,3 +84,15 @@ A human QA lead does not send a build back to the developer because the test lab
 - The report renders these checks as "not verifiable in this environment", never as passed.
 
 This release includes the unreleased 2.4.9 snapshot-provenance changes. There are no new grants or network access.
+
+## Ticket discussion (2.6.0)
+
+Answers directed ticket questions using current ticket context and recorded review evidence. Responses clarify findings without changing review decisions, acceptance criteria or validation requirements.
+
+The agent subscribes to `com.csweet.work.item.discussion.changed.v1` and uses grant-governed item,
+comment, board and orchestration reads. Ask with `@Full Name: your question` on a team ticket.
+Replies use `discussion.reply` and an exact comment/revision correlation; duplicates and stale
+requests are ignored. Informational notifications do not trigger automatic conversation loops.
+Bounded attention recovery scans the current assigned project for missed requests. The host retains
+undelivered notifications while offline; install the matching C-Sweet host update and approve new
+manifest permissions. Comments provide context, never execution authority or review approval.

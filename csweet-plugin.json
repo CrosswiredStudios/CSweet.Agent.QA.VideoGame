@@ -19,7 +19,7 @@
   },
   "id": "com.csweet.video-game-qa",
   "name": "Rohan Desai",
-  "version": "2.5.2",
+  "version": "2.6.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -117,6 +117,24 @@
     }
   ],
   "requires": [
+    {
+      "name": "work.board.read",
+      "scope": "team",
+      "purpose": "Read current ticket context to answer directed discussion and recover missed notifications.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.orchestration.read",
+      "scope": "team",
+      "purpose": "Read current ticket context to answer directed discussion and recover missed notifications.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.item.comments.read",
+      "scope": "team",
+      "purpose": "Read current ticket context to answer directed discussion and recover missed notifications.",
+      "modelVisible": false
+    },
     {"name":"work.personal-todo.claim.v1","scope":"organization","purpose":"SDK lifecycle for calendar-triggered personal assignments; existing execution restrictions remain."},{"name":"work.personal-todo.complete.v1","scope":"organization","purpose":"SDK lifecycle for calendar-triggered personal assignments; existing execution restrictions remain."},{"name":"work.personal-todo.block.v1","scope":"organization","purpose":"SDK lifecycle for calendar-triggered personal assignments; existing execution restrictions remain."},{"name":"work.personal-todo.release.v1","scope":"organization","purpose":"SDK lifecycle for calendar-triggered personal assignments; existing execution restrictions remain."},{"name": "work.calendar.read.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
     {"name": "work.calendar.create.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
     {"name": "work.calendar.update.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
@@ -205,7 +223,8 @@
     }
   ],
   "events": {
-    "subscribes": ["com.csweet.calendar.reminder-due.v1", "com.csweet.work.personal-todo.available.v1", 
+    "subscribes": [
+      "com.csweet.work.item.discussion.changed.v1", "com.csweet.calendar.reminder-due.v1", "com.csweet.work.personal-todo.available.v1",
       "com.csweet.agent.coordination.turn-requested.v1"
     ]
   },
