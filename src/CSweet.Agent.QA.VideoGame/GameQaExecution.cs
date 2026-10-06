@@ -23,6 +23,9 @@ public sealed partial class SpecialistAgent
             return await base.ExecuteCapabilityCoreAsync(request, context, token);
         try
         {
+            if (ArtifactDeliveryReview.Supports(assignment))
+                return await ArtifactDeliveryReview.ExecuteAsync(assignment, context, context.CreateChatClient(new AgentLlmSelection(
+                    Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure an approved QA provider."), Settings.GetString("llmModel"))), token);
             var input = SpecialistAssignmentValidator.Validate(assignment, RoleKey);
             var standalone = assignment.StageKey == "specialist-execution";
             if (standalone && !GameQaExecution.HasFinalizedDelivery(assignment.Item))
@@ -67,10 +70,18 @@ public sealed partial class SpecialistAgent
             var inspection = await context.Platform.Git.InspectAsync(new InspectGitWorkspaceRequest(workspace.WorkspaceId, assignment.AssignmentRevision), token);
             if (inspection.HasTrackedChanges) throw new InvalidOperationException("QA changed tracked source; restore the exact tested revision before validation.");
             var needsDecision = GameQaExecution.RequiresDecision(outcome!);
+            var delivery = assignment.Item.Deserialize<WorkItem>(new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Delivery;
+            var reportOutput = delivery?.DeliveryPlanId.HasValue == true
+                ? JsonSerializer.SerializeToElement(new WorkDeliveryReviewResult(workspace.BaseCommitSha, outcome!.Passed, outcome.Summary,
+                    outcome.Criteria.Select(x => new WorkDeliveryCriterionResult(x.Criterion, x.Satisfied, x.Evidence)).ToArray(),
+                    outcome.Findings.Count > 0 ? outcome.Findings : outcome.Passed ? [] : [outcome.Summary])
+                    { Validations = outcome.Validations.Select(x => new WorkDeliveryValidationEvidence(delivery.RepositoryId, workspace.BaseCommitSha,
+                        x.Command, x.ExitCode, x.Succeeded, x.DiagnosticExcerpt ?? "")).ToArray() }, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                : JsonSerializer.SerializeToElement(outcome);
             var completedOutcome = needsDecision
                 ? GameQaExecution.DecisionOutcome(assignment, outcome!)
                 : new WorkExecutionOutcomeV1(assignment.StageExecutionId, assignment.AttemptId,
-                    WorkExecutionDispositions.Completed, verdict, outcome!.Summary, JsonSerializer.SerializeToElement(outcome),
+                    WorkExecutionDispositions.Completed, verdict, outcome!.Summary, reportOutput,
                     [new WorkExecutionEvidence("commit", "Independently tested source", workspace.BaseCommitSha)], []);
             if (standalone)
                 completedOutcome = await SaveStandaloneQaAsync(assignment, input, outcome!, stateKey, context, token);

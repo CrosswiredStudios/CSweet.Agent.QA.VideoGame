@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `2.6.0`
+- Version: `2.7.0`
 - Provides: `work.execution.run.v1`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -32,7 +32,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.40.0 and the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.59.0 and the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -85,7 +85,7 @@ A human QA lead does not send a build back to the developer because the test lab
 
 This release includes the unreleased 2.4.9 snapshot-provenance changes. There are no new grants or network access.
 
-## Ticket discussion (2.6.0)
+## Ticket discussion (2.7.0)
 
 Answers directed ticket questions using current ticket context and recorded review evidence. Responses clarify findings without changing review decisions, acceptance criteria or validation requirements.
 
@@ -96,3 +96,7 @@ requests are ignored. Informational notifications do not trigger automatic conve
 Bounded attention recovery scans the current assigned project for missed requests. The host retains
 undelivered notifications while offline; install the matching C-Sweet host update and approve new
 manifest permissions. Comments provide context, never execution authority or review approval.
+
+## Hierarchical delivery
+
+The V2 assignment identifies Task, Story, Epic or Release scope. Tasks require an authorized sprint; aggregate reviews require an active delivery plan and do not invent sprint identities. Use the exact assigned branch, commit or artifact revision. Every task requires independent QA, including documents. Managers accept aggregate candidates using current evidence; task completion does not promote to main or authorize deployment.
