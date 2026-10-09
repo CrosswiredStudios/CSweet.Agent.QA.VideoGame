@@ -6,8 +6,8 @@ namespace CSweet.Agent.QA.VideoGame;
 
 internal static class GameQaHarness
 {
-    internal const int MaxContextWindowTokens = 128_000;
-    internal const int MaxOutputTokens = 16_000;
+    internal const int MaxContextWindowTokens = 256_000;
+    internal const int MaxOutputTokens = 128_000;
     internal const int MaximumIterationsPerRequest = 48;
 
     internal static HarnessAgentOptions CreateOptions(
