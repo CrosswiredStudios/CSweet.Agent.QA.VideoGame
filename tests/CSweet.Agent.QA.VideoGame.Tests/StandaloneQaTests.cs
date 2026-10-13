@@ -101,9 +101,11 @@ public sealed class StandaloneQaTests
         Assert.Equal("completed", completed.OutcomeCode);
         Assert.Equal("Completed", completed.Disposition);
         Assert.Equal(Sha, completed.Evidence.Single(x => x.Kind == "commit").Value);
-        Assert.Equal(artifact!.Id, completed.Output.GetProperty("ArtifactId").GetGuid());
-        Assert.Equal(artifact.LatestRevisionId, completed.Output.GetProperty("RevisionId").GetGuid());
-        Assert.Equal(artifact.Revisions[0].ContentSha256, completed.Output.GetProperty("Sha256").GetString());
+        Assert.Equal(artifact!.Id, completed.Output.GetProperty("artifactId").GetGuid());
+        Assert.Equal(artifact.LatestRevisionId, completed.Output.GetProperty("revisionId").GetGuid());
+        Assert.Equal(artifact.Revisions[0].ContentSha256, completed.Output.GetProperty("sha256").GetString());
+        Assert.True(WorkArtifactDelivery.TryRead(completed.Output, out var delivery));
+        Assert.Equal(artifact.Id, delivery.ArtifactId);
         Assert.Single(creates.Select(x => x.IdempotencyKey).Distinct());
         Assert.Single(creates.Select(x => x.Content).Distinct());
         Assert.Single(submits.Select(x => x.IdempotencyKey).Distinct());

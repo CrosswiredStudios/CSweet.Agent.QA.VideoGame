@@ -53,7 +53,7 @@ public sealed partial class SpecialistAgent
             $"qa-report-submit:{assignment.StageExecutionId:N}:{revision.Id:N}"), token);
         return new(assignment.StageExecutionId, assignment.AttemptId, WorkExecutionDispositions.Completed, "completed",
             $"Independent QA passed for {outcome.SourceCommitSha}; exact report submitted for Producer acceptance.",
-            JsonSerializer.SerializeToElement(new { ArtifactId = artifact.Id, RevisionId = revision.Id, Sha256 = revision.ContentSha256 }),
+            new WorkArtifactDelivery(artifact.Id, revision.Id, revision.ContentSha256).ToOutput(),
             [evidence, new WorkExecutionEvidence("ArtifactRevision", artifact.Id.ToString("D"), revision.Id.ToString("D"), "application/json")], []);
     }
 }
