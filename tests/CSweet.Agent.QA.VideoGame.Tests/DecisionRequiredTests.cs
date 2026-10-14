@@ -24,9 +24,10 @@ public sealed class DecisionRequiredTests
             }
         };
 
-    private static WorkExecutionAssignmentV1 Assignment() =>
-        JsonSerializer.Deserialize<WorkExecutionAssignmentV1>("{}")! with
-        { StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(), ItemIdentifier = "VG4CC32F61E0-22" };
+    private static WorkExecutionAssignment Assignment() =>
+        JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with
+        {
+            Scope = "Task", SprintId = Guid.NewGuid(), SprintExecutionId = Guid.NewGuid(), PolicyRevisionId = Guid.NewGuid(), StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(), Identifier = "VG4CC32F61E0-22" };
 
     [Fact]
     public void Only_unverifiable_gaps_become_a_decision_for_the_producer()

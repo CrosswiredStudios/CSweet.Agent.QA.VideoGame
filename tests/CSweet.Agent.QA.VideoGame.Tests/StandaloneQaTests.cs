@@ -55,7 +55,9 @@ public sealed class StandaloneQaTests
     {
         var input = new WorkExecutionInputV1(Guid.NewGuid(), Guid.NewGuid(), 1,
             new WorkItemPlanningSpecification(["Test controls"], ["Paddle moves", "Touch works"])) { AllowedOutcomeCodes = ["completed"] };
-        var assignment = Empty<WorkExecutionAssignmentV1>() with { StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(), ItemId = Guid.NewGuid() };
+        var assignment = Empty<WorkExecutionAssignment>() with { Scope = "Task", SprintId = Guid.NewGuid(),
+            SprintExecutionId = Guid.NewGuid(), PolicyRevisionId = Guid.NewGuid(),
+            StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(), ItemId = Guid.NewGuid() };
         AgentOperatingStateResponse? state = null;
         ArtifactDocument? artifact = null;
         var lost = false;
@@ -74,7 +76,7 @@ public sealed class StandaloneQaTests
             {
                 Assert.NotNull(state);
                 Assert.Contains("Observed movement and touch input", state.Payload.GetRawText());
-                Assert.Equal(assignment.ItemId, create.OriginWorkItemId);
+                Assert.Equal(assignment.TaskItemId, create.OriginWorkItemId);
                 Assert.Equal(input.WorkstreamId, create.WorkstreamId);
                 creates.Add(create);
                 if (artifact is null)
@@ -82,7 +84,7 @@ public sealed class StandaloneQaTests
                     var id = Guid.NewGuid();
                     var revisionId = Guid.NewGuid();
                     var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(create.Content))).ToLowerInvariant();
-                    artifact = new(id, create.Title, create.DocumentType, "Draft", revisionId, null, null, null, assignment.ItemId,
+                    artifact = new(id, create.Title, create.DocumentType, "Draft", revisionId, null, null, null, assignment.TaskItemId,
                         [new(revisionId, 1, null, create.Content, hash, "Draft", DateTimeOffset.UtcNow, null, null)]);
                 }
                 if (!lost && loseAt == "create") { lost = true; throw new IOException("Create reply lost"); }
@@ -119,7 +121,7 @@ public sealed class StandaloneQaTests
     {
         var input = new WorkExecutionInputV1(Guid.NewGuid(), Guid.NewGuid(), 1,
             new WorkItemPlanningSpecification([], ["Paddle moves", "Touch works"])) { AllowedOutcomeCodes = ["completed"] };
-        var assignment = Empty<WorkExecutionAssignmentV1>() with { StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid() };
+        var assignment = Empty<WorkExecutionAssignment>() with { StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid() };
         var report = Passed() with { Passed = false, Findings = ["Touch failed"],
             Criteria = [Passed().Criteria[0], Passed().Criteria[1] with { Satisfied = false }] };
         var blocked = await SpecialistAgent.CompleteStandaloneQaAsync(assignment, input, report, new AgentTestRuntime().CreateContext(), default);

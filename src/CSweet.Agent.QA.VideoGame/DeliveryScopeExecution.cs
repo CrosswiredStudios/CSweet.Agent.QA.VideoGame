@@ -8,7 +8,7 @@ namespace CSweet.Agent.QA.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    protected override async Task<AgentWorkResult> ExecuteDeliveryScopeAsync(WorkExecutionAssignmentV2 assignment,
+    protected override async Task<AgentWorkResult> ExecuteDeliveryScopeAsync(WorkExecutionAssignment assignment,
         AgentRuntimeContext context, CancellationToken token)
     {
         try

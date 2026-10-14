@@ -19,16 +19,17 @@ public sealed class AssignmentWireTests
         var input = new WorkExecutionInputV1(Guid.NewGuid(), Guid.NewGuid(), 1,
             new WorkItemPlanningSpecification(["Move"], ["Moves"], [])
             {
-                DelegationRecommendations = [new("specialist-execution", "game-quality-assurance", ["work.execution.run.v1"], null, true, "Engineering")],
+                DelegationRecommendations = [new("specialist-execution", "game-quality-assurance", ["work.execution.run"], null, true, "Engineering")],
                 ArtifactPackageDigest = new(package, 1, ArtifactPackageDigestCalculator.Calculate(package, 1, members), DateTimeOffset.UtcNow, members)
             })
         {
-            AssignmentRequirements = new("game-quality-assurance", [], [], ["work.execution.run.v1"]),
+            AssignmentRequirements = new("game-quality-assurance", [], [], ["work.execution.run"]),
             AssignmentSelection = new(Guid.NewGuid(), 1, digest, [], digest, DateTimeOffset.UtcNow)
         };
-        var assignment = JsonSerializer.Deserialize<WorkExecutionAssignmentV1>("{}")! with
+        var assignment = JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with
         {
-            SprintExecutionId = Guid.NewGuid(), ItemExecutionId = Guid.NewGuid(), StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(),
+            Scope = "Task", PolicyRevisionId = Guid.NewGuid(),
+            SprintExecutionId = Guid.NewGuid(), ExecutionId = Guid.NewGuid(), StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(),
             OrganizationId = Guid.NewGuid(), BoardId = Guid.NewGuid(), SprintId = Guid.NewGuid(), ItemId = Guid.NewGuid(),
             AssignmentRevision = 1, Traversal = traversal, Attempt = 1, Deadline = DateTimeOffset.UtcNow.AddMinutes(5), StageKey = "specialist-execution",
             Input = JsonSerializer.SerializeToElement(input, new JsonSerializerOptions(camelCase ? JsonSerializerDefaults.Web : JsonSerializerDefaults.General))

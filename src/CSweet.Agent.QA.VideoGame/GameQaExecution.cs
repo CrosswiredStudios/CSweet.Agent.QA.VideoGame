@@ -12,10 +12,10 @@ public sealed partial class SpecialistAgent
     protected override async Task<AgentWorkResult> ExecuteCapabilityCoreAsync(AgentCapabilityRequest request,
         AgentRuntimeContext context, CancellationToken token)
     {
-        if (request.Capability != WorkManagementCapabilityNames.ExecutionRunV1)
+        if (request.Capability != WorkManagementCapabilityNames.ExecutionRun)
             return await base.ExecuteCapabilityCoreAsync(request, context, token);
-        WorkExecutionAssignmentV1? assignment;
-        try { assignment = DeserializePayload<WorkExecutionAssignmentV1>(request.Arguments); }
+        WorkExecutionAssignment? assignment;
+        try { assignment = DeserializePayload<WorkExecutionAssignment>(request.Arguments); }
         catch (JsonException) { return AgentWorkResult.Failure("The QA assignment is invalid JSON."); }
         if (assignment is null) return AgentWorkResult.Failure("An authoritative QA assignment is required.");
         // Only an authoritative finalized delivery activates repository validation for a standalone ticket.
@@ -37,9 +37,9 @@ public sealed partial class SpecialistAgent
             if (prior?.Payload.Outcome is { } completed) return AgentWorkResult.Success(completed);
             if (standalone && prior?.Payload.ValidatedReport is { } savedReport)
                 return AgentWorkResult.Success(await SaveStandaloneQaAsync(assignment, input, savedReport, stateKey, context, token));
-            var workspace = await context.Platform.Git.PrepareAsync(new PrepareGitWorkspaceRequest(assignment.ItemId,
+            var workspace = await context.Platform.Git.PrepareAsync(new PrepareGitWorkspaceRequest(assignment.TaskItemId,
                 assignment.AssignmentRevision, $"game-qa:{assignment.AttemptId:N}:prepare"), token);
-            var prepared = await GameQaWorkspace.MaterializeAsync(workspace, assignment.ItemId, assignment.AssignmentRevision, context, token);
+            var prepared = await GameQaWorkspace.MaterializeAsync(workspace, assignment.TaskItemId, assignment.AssignmentRevision, context, token);
             workspace = prepared.Workspace;
             var path = workspace.Path;
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure an approved QA provider.");
@@ -88,7 +88,7 @@ public sealed partial class SpecialistAgent
             await new RevisionSafeProjectState(context.Platform).MergeAsync<GameQaReceipt>(stateKey,
                 "video-game.qa-code-receipt.v1", 1, current => current ?? new(completedOutcome),
                 new Dictionary<string, string>(), $"{stateKey}:validated", token);
-            await context.Platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.ItemId,
+            await context.Platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.TaskItemId,
                 needsDecision
                     ? $"Independent QA needs a decision for {workspace.BaseCommitSha}. {completedOutcome.Summary}"
                     : $"Independent QA {verdict} for {workspace.BaseCommitSha}: {outcome!.Summary}", $"game-qa:{assignment.AttemptId:N}:evidence"), token);
@@ -183,11 +183,11 @@ internal static partial class GameQaExecution
         outcome.Criteria.Any(x => x.Unverifiable) &&
         outcome.Criteria.All(x => x.Satisfied || x.Unverifiable);
 
-    internal static WorkExecutionOutcomeV1 DecisionOutcome(WorkExecutionAssignmentV1 assignment, GameQaOutcome outcome)
+    internal static WorkExecutionOutcomeV1 DecisionOutcome(WorkExecutionAssignment assignment, GameQaOutcome outcome)
     {
         var unverifiable = outcome.Criteria.Where(x => x.Unverifiable).ToArray();
         var text = new System.Text.StringBuilder()
-            .Append($"Decision needed on {assignment.ItemIdentifier}: QA validated `{outcome.SourceCommitSha}` as far as this environment allows ")
+            .Append($"Decision needed on {assignment.Identifier}: QA validated `{outcome.SourceCommitSha}` as far as this environment allows ")
             .Append("and found no product defect, but ")
             .Append(unverifiable.Length == 1 ? "one acceptance criterion" : $"{unverifiable.Length} acceptance criteria")
             .Append(" cannot be verified by any available role:\n");

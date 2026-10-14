@@ -25,7 +25,7 @@ public sealed class WorkflowReviewAssignmentTests
                 throw new PlatformCapabilityException(PlatformCapabilities.AgentOperatingStateRead,
                     PlatformCapabilityErrorCode.Denied, "The operating-state grant is missing.");
             });
-        var result = await runtime.ExecuteCapabilityAsync(new SpecialistAgent(), WorkManagementCapabilityNames.ExecutionRunV1, assignment);
+        var result = await runtime.ExecuteCapabilityAsync(new SpecialistAgent(), WorkManagementCapabilityNames.ExecutionRun, assignment);
         Assert.True(result.Succeeded);
         var outcome = result.Value!.Value.Deserialize<WorkExecutionOutcomeV1>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         Assert.Equal("Blocked", outcome.Disposition);
@@ -74,7 +74,7 @@ public sealed class WorkflowReviewAssignmentTests
         Assert.ThrowsAny<Exception>(() => SpecialistAssignmentValidator.Validate(assignment, "game-technical-director"));
     }
 
-    private static (WorkExecutionAssignmentV1, WorkExecutionInputV1) Create(string stage, string role)
+    private static (WorkExecutionAssignment, WorkExecutionInputV1) Create(string stage, string role)
     {
         var digest = new string('a', 64);
         var members = new[] { new ArtifactPackageMemberDigest(Guid.NewGuid(), Guid.NewGuid(), "brief", digest) };
@@ -82,16 +82,17 @@ public sealed class WorkflowReviewAssignmentTests
         var input = new WorkExecutionInputV1(Guid.NewGuid(), Guid.NewGuid(), 1,
             new WorkItemPlanningSpecification(["Implement"], ["Test"], [])
             {
-                DelegationRecommendations = [new("specialist-execution", "game-engineer", ["work.execution.run.v1"], null, true, "Original approved planning")],
+                DelegationRecommendations = [new("specialist-execution", "game-engineer", ["work.execution.run"], null, true, "Original approved planning")],
                 ArtifactPackageDigest = new(package, 1, ArtifactPackageDigestCalculator.Calculate(package, 1, members), DateTimeOffset.UtcNow, members)
             })
         {
-            AssignmentRequirements = new(role, [], [], ["work.execution.run.v1"]),
+            AssignmentRequirements = new(role, [], [], ["work.execution.run"]),
             AssignmentSelection = new(Guid.NewGuid(), 5, digest, [], digest, DateTimeOffset.UtcNow)
         };
-        var assignment = JsonSerializer.Deserialize<WorkExecutionAssignmentV1>("{}")! with
+        var assignment = JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with
         {
-            SprintExecutionId = Guid.NewGuid(), ItemExecutionId = Guid.NewGuid(), StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(),
+            Scope = "Task", PolicyRevisionId = Guid.NewGuid(),
+            SprintExecutionId = Guid.NewGuid(), ExecutionId = Guid.NewGuid(), StageExecutionId = Guid.NewGuid(), AttemptId = Guid.NewGuid(),
             OrganizationId = Guid.NewGuid(), BoardId = Guid.NewGuid(), SprintId = Guid.NewGuid(), ItemId = Guid.NewGuid(),
             AssignmentRevision = 1, Attempt = 1, Deadline = DateTimeOffset.UtcNow.AddMinutes(5), StageKey = stage,
             Item = JsonSerializer.SerializeToElement(new { }), Evidence = [],

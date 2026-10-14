@@ -7,7 +7,7 @@ namespace CSweet.Agent.QA.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal static async Task<WorkExecutionOutcomeV1> SaveStandaloneQaAsync(WorkExecutionAssignmentV1 assignment,
+    internal static async Task<WorkExecutionOutcomeV1> SaveStandaloneQaAsync(WorkExecutionAssignment assignment,
         WorkExecutionInputV1 input, GameQaOutcome outcome, string stateKey, AgentRuntimeContext context, CancellationToken token)
     {
         GameQaExecution.ValidateOutcome(outcome, outcome.SourceCommitSha);
@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent
             new Dictionary<string, string>(), $"{stateKey}:completed", token);
         return finalized.Payload.Outcome!;
     }
-    internal static async Task<WorkExecutionOutcomeV1> CompleteStandaloneQaAsync(WorkExecutionAssignmentV1 assignment,
+    internal static async Task<WorkExecutionOutcomeV1> CompleteStandaloneQaAsync(WorkExecutionAssignment assignment,
         WorkExecutionInputV1 input, GameQaOutcome outcome, AgentRuntimeContext context, CancellationToken token)
     {
         GameQaExecution.ValidateCriterionCoverage(outcome, input.Planning!.AcceptanceCriteria);
@@ -43,7 +43,7 @@ public sealed partial class SpecialistAgent
         var markdown = GameQaExecution.RenderReport(outcome);
         var artifact = await context.Platform.Artifacts.CreateAsync(new CreateArtifactDocument(
             "Independent QA execution report", markdown, "video-game.qa-evaluation-plan.v1",
-            $"qa-report:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}", OriginWorkItemId: assignment.ItemId)
+            $"qa-report:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}", OriginWorkItemId: assignment.TaskItemId)
             { WorkstreamId = input.WorkstreamId, TeamId = input.TeamId }, token);
         var revision = artifact.Revisions.Single(x => x.Id == artifact.LatestRevisionId);
         var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(markdown))).ToLowerInvariant();
