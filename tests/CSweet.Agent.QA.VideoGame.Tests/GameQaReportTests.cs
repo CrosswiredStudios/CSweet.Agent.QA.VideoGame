@@ -14,9 +14,7 @@ public sealed class GameQaReportTests : IDisposable
         { Criteria = [new("Record desktop fps", passed, "No browser available; no fps number claimed")] };
 
     [Theory]
-    [InlineData("nested")]
     [InlineData("flat")]
-    [InlineData("encoded")]
     [InlineData("repair")]
     public async Task ReportSubmissionWorksThroughTheActualHarness(string format)
     {
@@ -48,8 +46,8 @@ public sealed class GameQaReportTests : IDisposable
             calls++;
             if (calls == 1 || format == "repair" && calls == 2)
             {
-                var arguments = WireArguments(format == "repair" ? "encoded" : format);
-                if (format == "repair" && calls == 1) arguments["criteria"] = "[]";
+                var arguments = WireArguments("flat");
+                if (format == "repair" && calls == 1) arguments["criteria"] = JsonSerializer.SerializeToElement(Array.Empty<object>());
                 if (format == "repair" && calls == 2)
                 {
                     var feedback = messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>().Last();
@@ -62,6 +60,8 @@ public sealed class GameQaReportTests : IDisposable
         }
     }
 
+    private static AIFunctionArguments Flat(GameQaOutcome report) => new(JsonSerializer.SerializeToElement(report,
+        new JsonSerializerOptions(JsonSerializerDefaults.Web)).EnumerateObject().ToDictionary(x => x.Name, x => (object?)x.Value.Clone()));
     private static AIFunctionArguments WireArguments(string format)
     {
         var report = JsonSerializer.SerializeToElement(Report(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -79,7 +79,7 @@ public sealed class GameQaReportTests : IDisposable
     public async Task InvalidBooleanEncodingCannotBecomeAPassingVerdict(string invalid)
     {
         Directory.CreateDirectory(root);
-        var arguments = WireArguments("encoded");
+        var arguments = WireArguments("flat");
         arguments["passed"] = invalid;
         var result = Assert.IsType<GameQaReport.Submission>(await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(arguments));
         Assert.False(result.Saved);
@@ -88,10 +88,10 @@ public sealed class GameQaReportTests : IDisposable
     }
 
     [Fact]
-    public async Task EncodedFailedReportPreservesEveryFindingAndCommand()
+    public async Task FlatFailedReportPreservesEveryFindingAndCommand()
     {
         Directory.CreateDirectory(root);
-        await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(WireArguments("encoded"));
+        await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(WireArguments("flat"));
         var saved = await GameQaReport.ReadAsync(root, default);
         Assert.Equal(JsonSerializer.Serialize(Report()), JsonSerializer.Serialize(saved));
     }
@@ -107,8 +107,7 @@ public sealed class GameQaReportTests : IDisposable
         Assert.True(tool.JsonSchema.GetProperty("properties").TryGetProperty("sourceCommitSha", out _));
         Assert.False(tool.JsonSchema.GetProperty("properties").TryGetProperty("report", out _));
         // Model tool arguments arrive as JSON, not preconstructed CLR records.
-        await tool.InvokeAsync(new AIFunctionArguments { ["report"] = System.Text.Json.JsonSerializer.SerializeToElement(
-            report, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) });
+        await tool.InvokeAsync(Flat(report));
         var saved = await GameQaReport.ReadAsync(root, default);
         Assert.False(saved.Passed);
         Assert.Equal(report.Findings, saved.Findings);
@@ -131,7 +130,7 @@ public sealed class GameQaReportTests : IDisposable
             _ => Report() with { Passed = true }
         };
         var result = await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"])
-            .InvokeAsync(new AIFunctionArguments { ["report"] = report });
+            .InvokeAsync(Flat(report));
         var error = Assert.IsType<GameQaReport.Submission>(result);
         Assert.False(error.Saved);
         Assert.Equal("report.invalid-evidence", error.Code);

@@ -19,7 +19,7 @@
   },
   "id": "com.csweet.video-game-qa",
   "name": "Rohan Desai",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -298,6 +298,12 @@
     }
   ],
   "requires": [
+    {
+      "name": "runtime.internet.public.v1",
+      "scope": "organization",
+      "purpose": "Restore pinned project dependencies in the isolated QA runtime for independent builds and tests.",
+      "modelVisible": false
+    },
     {
       "name": "work.delivery.read.v1",
       "scope": "organization",
@@ -599,8 +605,18 @@
   ],
   "credentials": [],
   "webAccess": {
-    "mode": "None",
-    "rules": []
+    "mode": "Allowlist",
+    "rules": [
+      {
+        "scheme": "https",
+        "host": "registry.npmjs.org",
+        "port": 443,
+        "pathPrefix": "/",
+        "methods": ["GET"],
+        "protocol": "http",
+        "purpose": "Restore pinned public npm dependencies for independent QA"
+      }
+    ]
   },
   "ui": [],
   "catalog": {

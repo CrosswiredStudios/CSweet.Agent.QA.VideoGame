@@ -18,19 +18,19 @@ public sealed class WorkflowReviewAssignmentTests
                 { AssignmentRequirements = input.AssignmentRequirements! with { RequiredRoleKey = "game-engineer" } },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
         var reads = 0;
-        var runtime = new AgentTestRuntime().RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(
-            PlatformCapabilities.AgentOperatingStateRead, (_, _) =>
+        var runtime = new AgentTestRuntime().RegisterCapability<WorkItemReference, WorkItem>(
+            WorkManagementCapabilityNames.ItemRead, (_, _) =>
             {
                 reads++;
-                throw new PlatformCapabilityException(PlatformCapabilities.AgentOperatingStateRead,
-                    PlatformCapabilityErrorCode.Denied, "The operating-state grant is missing.");
+                throw new PlatformCapabilityException(WorkManagementCapabilityNames.ItemRead,
+                    PlatformCapabilityErrorCode.Denied, "The current-item grant is missing.");
             });
         var result = await runtime.ExecuteCapabilityAsync(new SpecialistAgent(), WorkManagementCapabilityNames.ExecutionRun, assignment);
         Assert.True(result.Succeeded);
         var outcome = result.Value!.Value.Deserialize<WorkExecutionOutcomeV1>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         Assert.Equal("Blocked", outcome.Disposition);
         Assert.Equal(wrongRole ? 0 : 1, reads);
-        Assert.Contains(wrongRole ? "canonical assignment" : "The operating-state grant is missing.", outcome.Summary);
+        Assert.Contains(wrongRole ? "canonical assignment" : "The current-item grant is missing.", outcome.Summary);
         Assert.Empty(outcome.Evidence);
     }
 

@@ -32,6 +32,8 @@ public sealed partial class SpecialistAgent
                 return await base.ExecuteCapabilityCoreAsync(request, context, token);
             if (standalone && !input.AllowedOutcomeCodes.Contains("completed", StringComparer.Ordinal))
                 throw new InvalidOperationException("The assigned standalone QA policy does not accept reviewed document completion.");
+            var currentItem = await context.Platform.Work.ReadItemAsync(new(assignment.BoardId, assignment.TaskItemId), token);
+            var delivery = GameQaExecution.RequireCurrentDelivery(assignment, currentItem, context.InstallationId, standalone);
             var stateKey = $"game-qa:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}:{assignment.AssignmentRevision}";
             var prior = await context.Platform.ReadOperatingStateAsync<GameQaReceipt>(stateKey, token);
             if (prior?.Payload.Outcome is { } completed) return AgentWorkResult.Success(completed);
@@ -70,14 +72,14 @@ public sealed partial class SpecialistAgent
             var inspection = await context.Platform.Git.InspectAsync(new InspectGitWorkspaceRequest(workspace.WorkspaceId, assignment.AssignmentRevision), token);
             if (inspection.HasTrackedChanges) throw new InvalidOperationException("QA changed tracked source; restore the exact tested revision before validation.");
             var needsDecision = GameQaExecution.RequiresDecision(outcome!);
-            var delivery = assignment.Item.Deserialize<WorkItem>(new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Delivery;
-            var reportOutput = delivery?.DeliveryPlanId.HasValue == true
-                ? JsonSerializer.SerializeToElement(new WorkDeliveryReviewResult(workspace.BaseCommitSha, outcome!.Passed, outcome.Summary,
-                    outcome.Criteria.Select(x => new WorkDeliveryCriterionResult(x.Criterion, x.Satisfied, x.Evidence)).ToArray(),
-                    outcome.Findings.Count > 0 ? outcome.Findings : outcome.Passed ? [] : [outcome.Summary])
-                    { Validations = outcome.Validations.Select(x => new WorkDeliveryValidationEvidence(delivery.RepositoryId, workspace.BaseCommitSha,
-                        x.Command, x.ExitCode, x.Succeeded, x.DiagnosticExcerpt ?? "")).ToArray() }, new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                : JsonSerializer.SerializeToElement(outcome);
+            var latestItem = await context.Platform.Work.ReadItemAsync(new(assignment.BoardId, assignment.TaskItemId), token);
+            var latestDelivery = GameQaExecution.RequireCurrentDelivery(assignment, latestItem, context.InstallationId, standalone);
+            if (JsonSerializer.Serialize(delivery) != JsonSerializer.Serialize(latestDelivery) ||
+                JsonSerializer.Serialize(currentItem.Planning) != JsonSerializer.Serialize(latestItem.Planning))
+                throw new InvalidOperationException("QA planning or delivery changed during validation; no verdict was accepted.");
+            var reportOutput = standalone ? JsonSerializer.SerializeToElement(outcome) :
+                JsonSerializer.SerializeToElement(GameQaExecution.DeliveryReport(outcome!, delivery, workspace.BaseCommitSha),
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web));
             var completedOutcome = needsDecision
                 ? GameQaExecution.DecisionOutcome(assignment, outcome!)
                 : new WorkExecutionOutcomeV1(assignment.StageExecutionId, assignment.AttemptId,
@@ -121,6 +123,30 @@ internal sealed record GameQaOutcome(string SourceCommitSha, string Summary, boo
 internal sealed record GameQaCriterion(string Criterion, bool Satisfied, string Evidence, bool Unverifiable = false);
 internal static partial class GameQaExecution
 {
+    internal static WorkItemDeliverySpecification RequireCurrentDelivery(WorkExecutionAssignment assignment,
+        WorkItem item, string installationId, bool standalone)
+    {
+        if (item.Id != assignment.TaskItemId || item.Planning is null || item.PlanningRevision != assignment.PlanningRevision ||
+            item.Delivery is not { RepositoryId: var repository } delivery || repository == Guid.Empty ||
+            delivery.DeliveryKind != "Code" || string.IsNullOrWhiteSpace(delivery.BaseBranch) ||
+            (!standalone && (delivery.DeliveryPlanId is null || delivery.DeliveryPlanId != assignment.DeliveryPlanId)) ||
+            item.StageAssignments.SingleOrDefault(x => x.StageKey == assignment.StageKey)?.AgentInstallationId.ToString() != installationId ||
+            !standalone && item.StageAssignments.Any(x => x.StageKey is "development" or "specialist-execution" && x.AgentInstallationId.ToString() == installationId))
+            throw new InvalidOperationException("QA requires the current independent assignment, exact planning revision and finalized code delivery.");
+        return delivery;
+    }
+
+    internal static WorkDeliveryReviewResult DeliveryReport(GameQaOutcome outcome, WorkItemDeliverySpecification delivery, string commit)
+    {
+        _ = ValidateOutcome(outcome, commit);
+        ValidateCriterionCoverage(outcome, delivery.AcceptanceCriteria);
+        return new(commit, outcome.Passed, outcome.Summary,
+            outcome.Criteria.Select(x => new WorkDeliveryCriterionResult(x.Criterion, x.Satisfied, x.Evidence)).ToArray(),
+            outcome.Findings.Count > 0 ? outcome.Findings : outcome.Passed ? [] : [outcome.Summary])
+        { Validations = outcome.Validations.Select(x => new WorkDeliveryValidationEvidence(delivery.RepositoryId, commit,
+            x.Command, x.ExitCode, x.Succeeded, x.DiagnosticExcerpt ?? "")).ToArray() };
+    }
+
     internal const string Instructions = """
         Independently validate the exact game source revision supplied by the platform. Inspect and execute relevant
         build, regression and acceptance tests in this workspace. Do not implement fixes, alter tracked source, commit,

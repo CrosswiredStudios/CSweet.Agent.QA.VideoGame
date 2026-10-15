@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `3.0.0`
+- Version: `4.0.0`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -107,6 +107,12 @@ Model token settings default to 256,000 context-window tokens (maxContextWindowT
 
 SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
 
-## Execution contract (3.0.0)
+## Independent task QA (4.0.0)
+
+Task QA reads authorized current planning and delivery before tests and again before accepting a result. It emits one canonical `WorkDeliveryReviewResult` bound to the exact integrated story commit, with criterion and repository-bound command evidence. The report tool accepts flat named arguments with JSON booleans and arrays; nested or encoded legacy report shapes are rejected with feedback.
+
+The manifest requests `runtime.internet.public.v1` and HTTPS GET access to `registry.npmjs.org` for fresh npm restores. Approve this request through normal installation/grant review before retrying independent QA. It adds no credentials, host/private access, merge or deployment authority.
+
+## Execution contract
 
 Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.

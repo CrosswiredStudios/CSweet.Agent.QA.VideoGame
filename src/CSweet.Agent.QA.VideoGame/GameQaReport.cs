@@ -56,26 +56,11 @@ internal static class GameQaReport
 
     internal static AIFunctionArguments NormalizeArguments(AIFunctionArguments arguments)
     {
-        // Accept the previous nested form for compatibility, but reject ambiguous mixed input.
-        if (arguments.TryGetValue("report", out var nested))
-        {
-            if (arguments.Count != 1) throw new ArgumentException("Mixed report formats.");
-            var json = JsonSerializer.SerializeToElement(nested, JsonOptions);
-            if (json.ValueKind != JsonValueKind.Object) throw new ArgumentException("Report must be an object.");
-            arguments = new AIFunctionArguments(json.EnumerateObject().ToDictionary(x => x.Name, x => (object?)x.Value.Clone()));
-        }
         var normalized = new AIFunctionArguments();
         foreach (var field in new[] { "sourceCommitSha", "summary", "passed", "validations", "findings", "criteria" })
         {
             if (!arguments.TryGetValue(field, out var value)) throw new ArgumentException("Missing report field.");
             var json = JsonSerializer.SerializeToElement(value, JsonOptions);
-            if (field is not ("sourceCommitSha" or "summary") && json.ValueKind == JsonValueKind.String)
-            {
-                // Some provider tool parsers encode booleans/arrays as JSON strings. Decode exactly
-                // one layer, without guessing values, coercing truthiness, or rewriting evidence.
-                using var decoded = JsonDocument.Parse(json.GetString()!);
-                json = decoded.RootElement.Clone();
-            }
             var valid = field switch
             {
                 "sourceCommitSha" or "summary" => json.ValueKind == JsonValueKind.String,
