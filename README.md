@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `4.0.0`
+- Version: `4.0.1`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -116,3 +116,7 @@ The manifest requests `runtime.internet.public.v1` and HTTPS GET access to `regi
 ## Execution contract
 
 Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
+
+## Artifact review recovery (4.0.1)
+
+Consumes SDK 4.3.3. Deploy the matching platform dispatch/grant fix before retrying artifact QA. The reviewer receives the current author result and authorized retry evidence, rejects ambiguous history, and requires independent version-specific evidence for API and feasibility claims. Existing capability and network requests are unchanged.
