@@ -13,7 +13,7 @@ public sealed partial class SpecialistAgent
     {
         try
         {
-            if (assignment.StageKey != "quality" || assignment.Candidate is not { } candidate)
+            if (assignment.StageKey != "quality" && assignment.Handler != "quality" || assignment.Candidate is not { } candidate)
                 throw new InvalidOperationException("QA requires its assigned aggregate quality candidate.");
             var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
                 throw new InvalidOperationException("Configure an approved QA provider."), Settings.GetString("llmModel")));
