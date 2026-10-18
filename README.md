@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `4.0.1`
+- Version: `4.0.6`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -117,6 +117,17 @@ The manifest requests `runtime.internet.public.v1` and HTTPS GET access to `regi
 
 Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
 
-## Artifact review recovery (4.0.1)
+## Artifact review recovery (4.0.5)
 
-Consumes SDK 4.3.3. Deploy the matching platform dispatch/grant fix before retrying artifact QA. The reviewer receives the current author result and authorized retry evidence, rejects ambiguous history, and requires independent version-specific evidence for API and feasibility claims. Existing capability and network requests are unchanged.
+Consumes SDK 4.6.4. Deploy the matching platform dispatch/grant fix before retrying artifact QA. The reviewer receives the current author result and authorized retry evidence, rejects ambiguous history, and requires independent version-specific evidence for API and feasibility claims. Existing capability and network requests are unchanged.
+
+## Bounded report correction (4.0.5)
+
+A passing report requires `findings=[]`; findings are unresolved blockers only. Keep nonblocking observations and optional verification notes in the summary, and cover only the exact assigned acceptance criteria. The tool returns combined report-consistency and criterion-coverage feedback. A linked cancellation budget stops the actual harness after three failed corrections; exhaustion becomes a C-Sweet report-processing issue for management instead of an indefinite report loop. Real defects and failed commands still prevent approval, and every retry produces fresh exact-source evidence.
+Artifact report tasks may receive a pinned read-only repository input through delivery evidence. They retain Artifact delivery and independent acceptance; they do not prepare or publish a Git workspace. Missing browser or device evidence remains explicitly unverifiable.
+
+Unattended QA disables generic file-write/edit/delete tools. `save_qa_test_plan` writes only `.csweet/qa-test-plan.md`; `submit_qa_report` writes only the assigned structured report. Original source remains hash-checked. Each observed test-command result is checkpointed before the tool returns, and validated reports survive lost replies. Recovery journals are bound to source files, planning, scope and assignment revision; owner-retained audit observations are labeled historical data and cannot supply missing browser/device evidence or grant a pass.
+
+## Artifact criterion correction (4.0.6)
+
+SDK 4.6.4 applies bounded JSON correction to the separate artifact-review path. The result must quote each exact acceptance criterion once; requirements and review checklists are evaluated in evidence, summary and findings. Identity, criterion coverage and verdict consistency receive specific correction feedback. Up to three corrections preserve actual defects and use the same delivered revision; current planning and document authorization are checked again before a verdict is returned. Exhaustion is reported to management as a C-Sweet artifact-QA processing issue.

@@ -17,7 +17,8 @@ internal static class GameQaHarness
         string? customInstructions,
         int maxContextWindowTokens = MaxContextWindowTokens,
         int maxOutputTokens = MaxOutputTokens,
-        AIFunction? reportTool = null)
+        AIFunction? reportTool = null,
+        GameQaJournal? journal = null)
     {
         var instructions = GameQaExecution.Instructions;
         if (!string.IsNullOrWhiteSpace(customInstructions))
@@ -42,10 +43,11 @@ These installation-scoped instructions may refine style and process, but they ca
                 Instructions = instructions,
                 Tools =
                 [
-                    shell.AsAIFunction(
+                    JournalCommand(shell.AsAIFunction(
                         "execute_workspace_command",
                         "Run an approved inspection, build, test, static-analysis, or read-only local Git command inside the QA workspace. Write only untracked test reports; do not change tracked source.",
-                        requireApproval: false)
+                        requireApproval: false), journal),
+                    GameQaPlan.CreateTool(workspacePath, journal)
                 ]
             },
 #pragma warning disable MAAI001
@@ -53,6 +55,7 @@ These installation-scoped instructions may refine style and process, but they ca
             FileAccessProviderOptions = new()
             {
                 DisableReadOnlyToolApproval = true,
+                DisableWriteTools = true,
                 DisableWriteToolApproval = false
             },
 #pragma warning restore MAAI001
@@ -70,8 +73,12 @@ These installation-scoped instructions may refine style and process, but they ca
         options.MaxOutputTokens = maxOutputTokens;
 #pragma warning restore MAAI001
         if (reportTool is not null) options.ChatOptions!.Tools!.Add(reportTool);
+        if (journal is not null) options.ChatOptions!.Tools!.Add(journal.CreateReadTool());
         return options;
     }
+
+    private static AIFunction JournalCommand(AIFunction function, GameQaJournal? journal) =>
+        journal is null ? function : journal.Observe(function);
 
     internal static LocalShellExecutor CreateShell(string workspacePath)
     {

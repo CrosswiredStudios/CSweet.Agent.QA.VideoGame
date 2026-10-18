@@ -40,16 +40,18 @@ internal sealed record GameQaWorkspace(GitWorkspaceResult Workspace, IReadOnlyDi
         return result;
     }
 
-    internal async Task VerifySourceUnchangedAsync(CancellationToken token)
+    internal Task VerifySourceUnchangedAsync(CancellationToken token) => VerifySourceUnchangedAsync(Workspace.Path, SourceHashes, token);
+
+    internal static async Task VerifySourceUnchangedAsync(string root, IReadOnlyDictionary<string, string> hashes, CancellationToken token)
     {
-        foreach (var (relative, expectedHash) in SourceHashes)
+        foreach (var (relative, expectedHash) in hashes)
         {
-            var path = ResolveSourcePath(Workspace.Path, relative);
+            var path = ResolveSourcePath(root, relative);
             for (var current = path; current is not null; current = Path.GetDirectoryName(current))
             {
                 if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
                     throw new InvalidOperationException("QA source must not contain symbolic links.");
-                if (string.Equals(current, Path.GetFullPath(Workspace.Path), StringComparison.Ordinal)) break;
+                if (string.Equals(current, Path.GetFullPath(root), StringComparison.Ordinal)) break;
             }
             if (!File.Exists(path)) throw new InvalidOperationException("QA removed original source; the exact tested revision must remain unchanged.");
             await using var source = File.OpenRead(path);

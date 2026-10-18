@@ -14,6 +14,59 @@ public sealed class GameQaReportTests : IDisposable
         { Criteria = [new("Record desktop fps", passed, "No browser available; no fps number claimed")] };
 
     [Theory]
+    [InlineData(4096)]
+    [InlineData(16000)]
+    public async Task FullQaSummaryIsRetainedWhileStageStatusFitsStorage(int length)
+    {
+        var full = new string('s', length);
+        await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(Flat(Report(true) with { Summary = full }));
+        var saved = await GameQaReport.ReadAsync(root, default);
+        Assert.Equal(full, saved.Summary);
+        Assert.True(GameQaExecution.StatusSummary(saved.Summary).Length <= 4096);
+        if (length > 4096) Assert.Contains("full QA report", GameQaExecution.StatusSummary(saved.Summary));
+    }
+
+    [Fact]
+    public async Task PassingReportGetsCombinedActionableBlockerAndCoverageFeedback()
+    {
+        var report = Report(true) with { Findings = ["[Non-blocking] Optional audible check"],
+            Criteria = [new("Extra verification step", true, "Observed")] };
+        var result = Assert.IsType<GameQaReport.Submission>(await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(Flat(report)));
+        Assert.False(result.Saved);
+        Assert.Contains("passed=true requires findings=[]", result.Message);
+        Assert.Contains("nonblocking observations", result.Message);
+        Assert.Contains("criterion", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(new[] { "Record desktop fps" }, result.RequiredCriteria);
+        Assert.False(File.Exists(Path.Combine(root, ".csweet", "qa-outcome.json")));
+    }
+
+    [Fact]
+    public async Task NonblockingNotesRemainInSummaryWithoutInventingOrRemovingACriterion()
+    {
+        var report = Report(true) with { Summary = "Required criterion verified. Optional browser playback was not executed; follow-up remains documented." };
+        var result = Assert.IsType<JsonElement>(await GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]).InvokeAsync(Flat(report)));
+        Assert.True(result.GetProperty("saved").GetBoolean());
+        Assert.Equal(report.Summary, (await GameQaReport.ReadAsync(root, default)).Summary);
+    }
+
+    [Fact]
+    public async Task RepeatedInvalidReportsCancelTheActualHarnessAfterThreeCorrections()
+    {
+        Directory.CreateDirectory(root);
+        using var budget = new GameQaReport.CorrectionBudget(default);
+        await using var shell = GameQaHarness.CreateShell(root);
+        using var client = new ReportClient("exhaust");
+        var harness = client.AsHarnessAgent(GameQaHarness.CreateOptions("QA", root, shell, null,
+            reportTool: GameQaReport.CreateTool(root, Sha, ["Record desktop fps"], budget)));
+        var session = await harness.CreateSessionAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => harness.RunAsync("Submit report", session, cancellationToken: budget.Token));
+        Assert.True(budget.Exhausted);
+        Assert.Contains("No QA verdict was accepted", budget.FailureMessage);
+        Assert.Equal(4, client.Calls);
+        Assert.False(File.Exists(Path.Combine(root, ".csweet", "qa-outcome.json")));
+    }
+
+    [Theory]
     [InlineData("flat")]
     [InlineData("repair")]
     public async Task ReportSubmissionWorksThroughTheActualHarness(string format)
@@ -32,6 +85,7 @@ public sealed class GameQaReportTests : IDisposable
     private sealed class ReportClient(string format) : IChatClient
     {
         private int calls;
+        public int Calls => calls;
         public void Dispose() { }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -44,9 +98,10 @@ public sealed class GameQaReportTests : IDisposable
             foreach (var result in messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>())
                 Assert.DoesNotContain("Error", result.Result?.ToString() ?? "", StringComparison.OrdinalIgnoreCase);
             calls++;
-            if (calls == 1 || format == "repair" && calls == 2)
+            if (format == "exhaust" || calls == 1 || format == "repair" && calls == 2)
             {
                 var arguments = WireArguments("flat");
+                if (format == "exhaust") arguments["passed"] = true;
                 if (format == "repair" && calls == 1) arguments["criteria"] = JsonSerializer.SerializeToElement(Array.Empty<object>());
                 if (format == "repair" && calls == 2)
                 {
@@ -139,6 +194,16 @@ public sealed class GameQaReportTests : IDisposable
     }
 
     [Fact]
+    public async Task ASecondSubmissionCannotOverwriteTheFirstValidatedEvidence()
+    {
+        var tool=GameQaReport.CreateTool(root,Sha,["Record desktop fps"]);
+        await tool.InvokeAsync(Flat(Report(false)));
+        var second=Assert.IsType<GameQaReport.Submission>(await tool.InvokeAsync(Flat(Report(true))));
+        Assert.Equal("already-saved",second.Code);
+        Assert.False((await GameQaReport.ReadAsync(root,default)).Passed);
+    }
+
+    [Fact]
     public async Task MissingAndMalformedReportsHaveSpecificDiagnosticsAndOldEvidenceIsRemoved()
     {
         Directory.CreateDirectory(Path.Combine(root, ".csweet"));
@@ -162,6 +227,7 @@ public sealed class GameQaReportTests : IDisposable
 #pragma warning disable MAAI001
         Assert.True(options.FileAccessProviderOptions!.DisableReadOnlyToolApproval);
         Assert.False(options.FileAccessProviderOptions.DisableWriteToolApproval);
+        Assert.True(options.FileAccessProviderOptions.DisableWriteTools);
 #pragma warning restore MAAI001
         Assert.True(options.DisableToolAutoApproval);
         Assert.Contains(options.ChatOptions!.Tools!, x => x is AIFunction f && f.Name == "submit_qa_report");

@@ -69,7 +69,9 @@ internal static partial class GameQaExecution
         var text = value.GetString();
         if (string.IsNullOrWhiteSpace(text)) return false;
         var delivery = JsonSerializer.Deserialize<WorkItemDeliverySpecification>(text, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        if (delivery is null || delivery.RepositoryId == Guid.Empty || string.IsNullOrWhiteSpace(delivery.BaseBranch))
+        if (delivery is { DeliveryKind: "Artifact", DeliveryPlanId: not null, RepositoryId: var repository, BaseBranch.Length: 0 } && repository == Guid.Empty)
+            return true;
+        if (delivery is null || delivery.DeliveryKind != "Code" || delivery.RepositoryId == Guid.Empty || string.IsNullOrWhiteSpace(delivery.BaseBranch))
             throw new InvalidOperationException("Repository QA requires finalized repository and base-branch identity.");
         return true;
     }

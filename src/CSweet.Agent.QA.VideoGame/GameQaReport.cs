@@ -8,7 +8,8 @@ internal static class GameQaReport
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    internal static AIFunction CreateTool(string workspace, string commit, IReadOnlyList<string> requiredCriteria) =>
+    internal static AIFunction CreateTool(string workspace, string commit, IReadOnlyList<string> requiredCriteria, CorrectionBudget? budget = null,
+        Func<GameQaOutcome, CancellationToken, Task>? checkpoint = null) =>
         new ReportFunction(AIFunctionFactory.Create(
             async (string sourceCommitSha, string summary, bool passed, IReadOnlyList<GitValidationResult> validations,
                 IReadOnlyList<string> findings, IReadOnlyList<GameQaCriterion> criteria, CancellationToken cancellationToken) =>
@@ -19,39 +20,79 @@ internal static class GameQaReport
                 var path = ReportPath(workspace);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 await File.WriteAllTextAsync(path, JsonSerializer.Serialize(report, JsonOptions), cancellationToken);
+                if (checkpoint is not null) await checkpoint(report, cancellationToken);
                 return new Submission(true, "saved", "QA report saved. Source-integrity checks and delivery gates still apply.");
             },
             "submit_qa_report",
-            "Save the final independent QA report for the assigned commit. Supply sourceCommitSha, summary, passed, validations, findings and criteria directly as named arguments. Include every exact acceptance criterion and actual command results. Unmet criteria must not pass. Set a criterion's unverifiable=true (with satisfied=false) only when its evidence needs a device, browser, network, registry, service or tool unavailable here; defects are never unverifiable. This writes only the designated report, never source files."), commit, requiredCriteria);
+            "Save the final independent QA report for the assigned commit. Supply sourceCommitSha, summary, passed, validations, findings and criteria directly as named arguments. Include ONLY the exact supplied acceptance criteria, once each, and actual command results. findings contains unresolved blockers only; passed=true REQUIRES findings=[]. Keep nonblocking observations and optional verification notes in summary. Never erase a real defect to pass: report passed=false instead. Set a required criterion's unverifiable=true (with satisfied=false) only when its evidence needs an unavailable environment; do not add extra criteria. This writes only the designated report, never source files."), commit, requiredCriteria, budget);
+
+    internal sealed class CorrectionBudget(CancellationToken token) : IDisposable
+    {
+        private readonly CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(token);
+        private int invalid;
+        internal bool Exhausted { get; private set; }
+        internal CancellationToken Token => stop.Token;
+        internal string FailureMessage { get; private set; } = "";
+        internal Submission Reject(Submission feedback)
+        {
+            invalid++;
+            if (invalid < 4) return feedback with { Message = feedback.Message + $" Correct all listed issues together; correction {invalid}/3. Preserve actual defects and executed evidence." };
+            Exhausted = true;
+            FailureMessage = "C-Sweet QA report validation exhausted three corrections. No QA verdict was accepted. " +
+                "Escalate this report-processing issue to management for code correction. " + feedback.Message;
+            stop.Cancel();
+            return feedback with { Code = "report.correction-exhausted", Message = FailureMessage };
+        }
+        public void Dispose() => stop.Dispose();
+    }
 
     internal sealed record Submission(bool Saved, string Code, string Message, IReadOnlyList<string>? RequiredCriteria = null);
 
-    private sealed class ReportFunction(AIFunction inner, string commit, IReadOnlyList<string> criteria) : DelegatingAIFunction(inner)
+    private sealed class ReportFunction(AIFunction inner, string commit, IReadOnlyList<string> criteria, CorrectionBudget? budget) : DelegatingAIFunction(inner)
     {
+        private readonly SemaphoreSlim gate = new(1,1);
+        private bool saved;
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
+            await gate.WaitAsync(cancellationToken);
+            try { return await SubmitAsync(arguments,cancellationToken); }
+            finally {gate.Release();}
+        }
+        private async ValueTask<object?> SubmitAsync(AIFunctionArguments arguments,CancellationToken cancellationToken)
+        {
+            if(saved) return new Submission(true,"already-saved","The first validated report and its observations are retained. Finish this QA turn; do not replace its verdict.");
             try
             {
                 var normalized = NormalizeArguments(arguments);
                 var report = JsonSerializer.Deserialize<GameQaOutcome>(JsonSerializer.Serialize(normalized, JsonOptions), JsonOptions);
-                GameQaExecution.ValidateOutcome(report, commit);
-                GameQaExecution.ValidateCriterionCoverage(report!, criteria);
-                return await InnerFunction.InvokeAsync(normalized, cancellationToken);
+                var issues = new List<string>();
+                try { GameQaExecution.ValidateOutcome(report, commit); }
+                catch (InvalidOperationException error) { issues.Add(error.Message); }
+                if (report is not null)
+                {
+                    try { GameQaExecution.ValidateCriterionCoverage(report, criteria); }
+                    catch (InvalidOperationException error) { issues.Add(error.Message); }
+                }
+                if (issues.Count != 0) throw new InvalidOperationException(string.Join("; ", issues));
+                var result=await InnerFunction.InvokeAsync(normalized, cancellationToken);
+                saved=true;
+                return result;
             }
             catch (Exception error) when (error is JsonException or ArgumentException)
             {
-                return new Submission(false, "report.invalid-arguments",
-                    "Supply sourceCommitSha and summary as strings, passed as a JSON boolean, and validations, findings and criteria as JSON arrays. Do not omit fields or change evidence to make submission succeed.", criteria);
+                return Reject(new Submission(false, "report.invalid-arguments",
+                    "Supply sourceCommitSha and summary as strings, passed as a JSON boolean, and validations, findings and criteria as JSON arrays. Do not omit fields or change evidence to make submission succeed.", criteria));
             }
             catch (InvalidOperationException error)
             {
-                return new Submission(false, "report.invalid-evidence", error.Message, criteria);
+                return Reject(new Submission(false, "report.invalid-evidence", error.Message, criteria));
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
                 return new Submission(false, "report.write-failed", $"The QA report could not be saved ({error.GetType().Name}). No verdict was accepted.");
             }
         }
+        private Submission Reject(Submission feedback) => budget?.Reject(feedback) ?? feedback;
     }
 
     internal static AIFunctionArguments NormalizeArguments(AIFunctionArguments arguments)
@@ -96,11 +137,14 @@ internal static class GameQaReport
         }
     }
 
-    private static string ReportPath(string workspace)
+    private static string ReportPath(string workspace) => SafePath(workspace, "qa-outcome.json");
+
+    internal static string SafePath(string workspace, string file)
     {
+        if (file is not ("qa-outcome.json" or "qa-test-plan.md")) throw new ArgumentException("Only designated QA evidence files may be written.");
         var root = Path.GetFullPath(workspace);
         var directory = Path.Combine(root, ".csweet");
-        var path = Path.Combine(directory, "qa-outcome.json");
+        var path = Path.Combine(directory, file);
         // Reject links at every existing ancestor, including a dangling report-file link.
         for (var current = path; current is not null; current = Path.GetDirectoryName(current))
         {

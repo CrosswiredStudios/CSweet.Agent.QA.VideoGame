@@ -37,6 +37,35 @@ public sealed class HierarchicalQaContractTests
     }
 
     [Theory]
+    [InlineData("current", true)]
+    [InlineData("missing", false)]
+    [InlineData("planning", false)]
+    [InlineData("assignee", false)]
+    [InlineData("scope", false)]
+    [InlineData("branch", false)]
+    [InlineData("commit", false)]
+    public void ArtifactReportHasIndependentReadOnlyInputAuthority(string change, bool allowed)
+    {
+        var id=Guid.NewGuid(); var author=Guid.NewGuid(); var plan=Guid.NewGuid(); var sha=new string('a',40);
+        var delivery=new WorkItemDeliverySpecification(Guid.Empty,["Inspect"],["Observed"]) { DeliveryKind="Artifact", DeliveryPlanId=plan };
+        var repository=new WorkDeliveryRepositoryCandidate(Guid.NewGuid(),"csweet/story/one","csweet/story/one",sha,sha,sha);
+        if(change=="branch") repository=repository with {TargetBranch="main"};
+        if(change=="commit") repository=repository with {CandidateCommitSha=new string('b',40)};
+        var assignment=JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with {
+            Scope="Task",SprintExecutionId=Guid.NewGuid(),SprintId=Guid.NewGuid(),PolicyRevisionId=Guid.NewGuid(),ItemId=id,PlanningRevision=2,DeliveryPlanId=plan,ScopeRevision=3,StageKey="specialist-execution",
+            Candidate=change=="missing"?null:new("input-digest",change=="scope"?4:3,[repository],[]) };
+        var item=JsonSerializer.Deserialize<WorkItem>("{}")! with {Id=id,PlanningRevision=change=="planning"?3:2,
+            Planning=new(["Inspect"],["Observed"]), Delivery=delivery,
+            StageAssignments=[new("specialist-execution","AgentInstallation",AgentInstallationId:author)]};
+        var actor=(change=="assignee"?Guid.NewGuid():author).ToString();
+        if(allowed) Assert.Equal(delivery,GameQaExecution.RequireCurrentSource(assignment,item,actor,true));
+        else Assert.Throws<InvalidOperationException>(()=>GameQaExecution.RequireCurrentSource(assignment,item,actor,true));
+        Assert.Equal(Guid.Empty,delivery.RepositoryId); Assert.Empty(delivery.BaseBranch);
+        Assert.Throws<InvalidOperationException>(()=>GameQaExecution.RequireCurrentDelivery(assignment,item,actor,true));
+        Assert.True(GameQaExecution.HasFinalizedDelivery(JsonSerializer.SerializeToElement(new {deliverySpecificationJson=JsonSerializer.Serialize(delivery,Json)})));
+    }
+
+    [Theory]
     [InlineData(true)][InlineData(false)]
     public async Task NoncanonicalNestedOrEncodedArgumentsAreRejected(bool nested)
     {
