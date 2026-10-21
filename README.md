@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.0.1`
+- Version: `5.1.0`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -106,6 +106,28 @@ Model token settings default to 256,000 context-window tokens (maxContextWindowT
 ## Delegation and tracking
 
 SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
+
+## Browser testing compute (5.1.0)
+
+`test_web_build` accepts a workspace-relative static output directory, viewport widths (normally
+`[375,1280]`) and a WebGL requirement. Build the authorized source first. The tool verifies original
+source hashes, creates a deterministic archive of the actual output, and pins its SHA-256 and source
+commit before compute submission. It tests these bytes, never an arbitrary URL or a mutable preview.
+This is an independently produced QA build; it is not a claim that a separately published release
+artifact was tested. Startup smoke tests do not establish gameplay, FPS or physical-device support.
+
+The platform needs `browser-testing-v1` compute preparation and reviewed `compute.provision.v1`,
+`compute.read.v1`, `compute.execute.v1` grants. Browser execution has no outbound network. Build assets
+must be local. Compute events resume pending QA; a five-minute current-state recovery handles missed
+wakes. Requests and operation identities survive lost replies without rerunning uncertain tests.
+Screenshots, traces and `result.json` are retained as a digest-verified `browser-artifact` ZIP in the
+QA journal, readable with `read_qa_evidence`. Current limits: 16 MiB compressed build, 64 MiB expanded,
+10,000 files, four viewport widths, 30 seconds per operation and 4 MiB retained evidence.
+
+Deploy platform changes and prepare the new compute image before updating QA through a published
+release and Installed Agents. Existing compute images fail closed for browser workloads. Existing
+compute instances retain their original image; drain/release those instances before using the new
+template. Source verification and final acceptance remain independent of browser smoke results.
 
 ## Independent task QA (5.0.1)
 

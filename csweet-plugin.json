@@ -19,7 +19,7 @@
   },
   "id": "com.csweet.video-game-qa",
   "name": "Rohan Desai",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -298,6 +298,9 @@
     }
   ],
   "requires": [
+    { "name": "compute.provision.v1", "scope": "organization", "purpose": "Request isolated project browser-test compute for the exact QA build.", "modelVisible": false },
+    { "name": "compute.read.v1", "scope": "organization", "purpose": "Recover authorized browser-test compute and operation results.", "modelVisible": false },
+    { "name": "compute.execute.v1", "scope": "organization", "purpose": "Transfer a pinned static build, execute the browser workload and retain screenshots and traces.", "modelVisible": false },
     {
       "name": "runtime.internet.public.v1",
       "scope": "organization",

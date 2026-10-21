@@ -23,6 +23,9 @@ public sealed class ManifestTests
         using var json = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(path));
         var required = json.RootElement.GetProperty("requires").EnumerateArray().Select(x => x.GetProperty("name").GetString()).ToArray();
         Assert.Contains(GitWorkspaceCapabilities.Prepare, required);
+        Assert.Contains("compute.provision.v1", required);
+        Assert.Contains("compute.read.v1", required);
+        Assert.Contains("compute.execute.v1", required);
         Assert.Contains(RuntimePermissions.PublicInternet, required);
         Assert.Contains(json.RootElement.GetProperty("webAccess").GetProperty("rules").EnumerateArray(),
             rule => rule.GetProperty("host").GetString() == "registry.npmjs.org");
