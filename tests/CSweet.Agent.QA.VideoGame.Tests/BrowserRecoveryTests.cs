@@ -11,8 +11,10 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 
 public sealed class BrowserRecoveryTests
 {
-    [Fact]
-    public async Task Lost_browser_submission_reuses_the_exact_operation_and_retains_evidence_before_qa_resumes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Lost_browser_submission_reuses_the_exact_operation_and_retains_evidence_before_qa_resumes(bool lostBeforeAcceptance)
     {
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var states = new Dictionary<string, AgentOperatingStateResponse>();
@@ -55,6 +57,7 @@ public sealed class BrowserRecoveryTests
                 var workload = request.GetProperty("workload");
                 var browser = workload.TryGetProperty("browserTest", out var specification);
                 var command = browser ? null : workload.GetProperty("command").Deserialize<ComputeCommand>(json)!;
+                if (browser && lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission before acceptance"); }
                 var requestId = browser ? specification.GetProperty("requestId").GetGuid() : command!.RequestId;
                 string output = "";
                 if (browser) {
@@ -69,7 +72,7 @@ public sealed class BrowserRecoveryTests
                 var operation = new ComputeOperation(Guid.NewGuid(), environmentId, environment.Generation, "Pending", null,
                     new(Command: new(requestId, 0, false, Encoding.UTF8.GetBytes(output), [])));
                 operations[operation.Id] = operation; submissions[key] = (request.Clone(), operation.Id);
-                if (browser && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission reply after acceptance"); }
+                if (browser && !lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission reply after acceptance"); }
                 return Task.FromResult(operation);
             });
         var context = runtime.CreateContext();

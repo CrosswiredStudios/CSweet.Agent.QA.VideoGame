@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.1.0`
+- Version: `5.1.1`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -108,6 +108,11 @@ Model token settings default to 256,000 context-window tokens (maxContextWindowT
 SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
 
 ## Browser testing compute (5.1.0)
+
+Version 5.1.1 refreshes the environment after resubmitting a retained request with no known operation
+ID, before validating its generation. This covers rejection or connection loss before acceptance
+without changing request terms or rerunning a known operation. The matching platform must accept
+the full upload script within its existing combined 32 KiB guest command budget.
 
 `test_web_build` accepts a workspace-relative static output directory, viewport widths (normally
 `[375,1280]`) and a WebGL requirement. Build the authorized source first. The tool verifies original

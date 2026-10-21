@@ -120,7 +120,12 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             var operation = state.OperationId is { } operationId
                 ? await context.Platform.Compute.ReadOperationAsync(operationId, token)
                 : await SubmitAsync(request, token);
-            if (state.OperationId is null) { state = state with { OperationId = operation.Id }; await SaveAsync(token); }
+            if (state.OperationId is null)
+            {
+                state = state with { OperationId = operation.Id };
+                await SaveAsync(token);
+                current = await context.Platform.Compute.ReadAsync(state.EnvironmentId.Value, token);
+            }
             if (operation.EnvironmentId != current.Id || operation.Generation != request.ExpectedGeneration + 1 ||
                 current.Generation != operation.Generation)
                 throw new InvalidOperationException("Browser compute returned a different operation identity.");
