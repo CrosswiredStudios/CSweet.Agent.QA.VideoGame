@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.1.1`
+- Version: `5.2.0`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -106,6 +106,17 @@ Model token settings default to 256,000 context-window tokens (maxContextWindowT
 ## Delegation and tracking
 
 SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
+
+## Assignment-scoped Git history (5.2.0)
+
+Code-task QA exposes `read_assigned_git_history` through the existing `git.workspace.inspect.v2`
+permission and SDK 5.2.0. Pages contain the pinned assigned commit, published commit and first parent,
+publication branch, bounded subjects/parents and current default-branch ancestry. Core derives the
+repository, revisions and refs from the authorized assignment; QA cannot choose them or receive
+credentials, push, amend, merge or rewrite history. Observations are retained in the QA journal.
+Historical subjects remain unchanged and must actually satisfy any conventional-commit criterion.
+Current ancestry is not proof of a historical branch-creation event. Artifact-only reviews do not
+gain a general repository-history reader. Deploy the matching platform and SDK before this release.
 
 ## Browser testing compute (5.1.0)
 

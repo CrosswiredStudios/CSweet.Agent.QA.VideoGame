@@ -19,7 +19,8 @@ internal static class GameQaHarness
         int maxOutputTokens = MaxOutputTokens,
         AIFunction? reportTool = null,
         GameQaJournal? journal = null,
-        AIFunction? browserTool = null)
+        AIFunction? browserTool = null,
+        AIFunction? historyTool = null)
     {
         var instructions = GameQaExecution.Instructions;
         if (!string.IsNullOrWhiteSpace(customInstructions))
@@ -75,6 +76,7 @@ These installation-scoped instructions may refine style and process, but they ca
 #pragma warning restore MAAI001
         if (reportTool is not null) options.ChatOptions!.Tools!.Add(reportTool);
         if (browserTool is not null) options.ChatOptions!.Tools!.Add(browserTool);
+        if (historyTool is not null) options.ChatOptions!.Tools!.Add(historyTool);
         if (journal is not null) options.ChatOptions!.Tools!.Add(journal.CreateReadTool());
         return options;
     }

@@ -19,7 +19,8 @@ public sealed class BrowserRecoveryTests
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var states = new Dictionary<string, AgentOperatingStateResponse>();
         var workspaceId = Guid.NewGuid(); var itemId = Guid.NewGuid(); var environmentId = Guid.NewGuid();
-        var commit = new string('a', 40); var project = Guid.NewGuid();
+        var commit = new string('a', 40); var project = Guid.NewGuid(); var repositoryId = Guid.NewGuid();
+        var wrongHistory = false;
         var environment = new ComputeEnvironment(environmentId, 1, 1, "running", "ready", "ephemeral",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, null);
         var operations = new Dictionary<Guid, ComputeOperation>();
@@ -37,11 +38,14 @@ public sealed class BrowserRecoveryTests
                 states[write.StateKey] = response; return Task.FromResult(response);
             })
             .RegisterCapability<PrepareGitWorkspaceRequest, GitWorkspaceResult>(GitWorkspaceCapabilities.Prepare,
-                (_, _) => Task.FromResult(new GitWorkspaceResult(workspaceId, itemId, "/remote", Guid.NewGuid(), "InternalGit", "Code", commit, "Ready", false)))
+                (_, _) => Task.FromResult(new GitWorkspaceResult(workspaceId, itemId, "/remote", repositoryId, "InternalGit", "Code", commit, "Ready", false)))
             .RegisterCapability<GitWorkspaceSyncRequest, GitWorkspaceSyncResult>(PlatformGitWorkspaceClient.SyncCapability,
                 (_, _) => Task.FromResult(new GitWorkspaceSyncResult(SourceArchive())))
             .RegisterCapability<InspectGitWorkspaceRequest, GitWorkspaceInspection>(GitWorkspaceCapabilities.Inspect,
-                (_, _) => Task.FromResult(new GitWorkspaceInspection(workspaceId, "Ready", false, [], [])))
+                (read, _) => Task.FromResult(new GitWorkspaceInspection(workspaceId, "Ready", false, [], []) {
+                    History = read.IncludeHistory ? new(repositoryId, wrongHistory ? new string('c', 40) : commit, commit,
+                        new('b', 40), "work/assigned", "main", new('b', 40), true,
+                        [new(commit, [new string('b', 40)], "feat(task): source fixture", false)], null) : null }))
             .RegisterCapability<ProvisionComputeRequest, ComputeEnvironment>(ComputeCapabilities.Provision, (_, _) => Task.FromResult(environment))
             .RegisterCapability<JsonElement, JsonElement>(ComputeCapabilities.Read, (request, cancellation) => {
                 object result = request.TryGetProperty("defaults", out _) ? new ComputeDefaults("Ready", project, "browser-fixture", null) { Features = ["browser-testing-v1"] } :
@@ -87,6 +91,14 @@ public sealed class BrowserRecoveryTests
             Directory.CreateDirectory(Path.Combine(source.Path, "dist"));
             await File.WriteAllTextAsync(Path.Combine(source.Path, "dist", "index.html"), "<canvas></canvas>");
             var journal = new GameQaJournal(assignment, input, source.SourceIdentity, context.Platform);
+            var historyTool = source.HistoryTool(assignment, context, journal)!;
+            Assert.Equal("read_assigned_git_history", historyTool.Name);
+            await historyTool.InvokeAsync(new AIFunctionArguments { ["offset"] = 0, ["limit"] = 20 });
+            Assert.Contains("git-history", await journal.ReadEvidenceAsync(default));
+            wrongHistory = true;
+            await Assert.ThrowsAnyAsync<Exception>(async () => await historyTool.InvokeAsync(new AIFunctionArguments { ["offset"] = 0, ["limit"] = 20 }));
+            wrongHistory = false;
+            await Assert.ThrowsAnyAsync<Exception>(async () => await historyTool.InvokeAsync(new AIFunctionArguments { ["offset"] = -1, ["limit"] = 20 }));
             var testing = new GameQaBrowserTesting(assignment, source, journal, context);
             await testing.Tool().InvokeAsync(new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true });
             Assert.True(testing.Pending);

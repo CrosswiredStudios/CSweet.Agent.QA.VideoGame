@@ -75,7 +75,7 @@ public sealed partial class SpecialistAgent
                             if (browser.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
                             if (browser.Failed && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
                             await prepared.VerifyAsync(assignment, context, ct); await journal.SaveReportAsync(report, ct);
-                        }), journal, browser.Tool()), token));
+                        }), journal, browser.Tool(), prepared.HistoryTool(assignment, context, journal)), token));
             var session = await harness.CreateSessionAsync(token);
             // A retry must execute and write fresh evidence, never accept an old report left in the workspace.
             GameQaReport.Reset(path);
@@ -213,6 +213,10 @@ internal static partial class GameQaExecution
     internal const string Instructions = """
         Independently validate the exact game source revision supplied by the platform.
         For browser acceptance, build this assigned source and use test_web_build on the actual static output directory.
+        For branch or commit-format criteria, use read_assigned_git_history when available; a source-only snapshot
+        intentionally lacks .git. Evaluate actual commit subjects and parent/ancestry evidence. Follow history pages
+        until NextOffset is null. Default-branch ancestry does not prove a historical branch creation event. Never
+        claim old commits follow conventional format merely because newer commits do. QA cannot publish or rewrite Git.
         Normally test widths 375 and 1280 with requireWebGl=true for Phaser/WebGL games. Do not replace browser
         execution with a DOM mock, HTTP 200 or a Node import. When test_web_build returns pending, finish the turn
         without submitting a QA report or polling; the platform resumes the same source-bound test from compute events.
