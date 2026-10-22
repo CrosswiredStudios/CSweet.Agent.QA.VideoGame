@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.2.0`
+- Version: `5.2.1`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -64,6 +64,15 @@ Version 2.4.6 runs repository-finalized standalone QA tickets through the existi
 SDK 3.65.0 downloads the broker-authorized exact revision into the isolated runtime. The workspace-sync declaration is used only for downloads; the broker continues to deny QA source uploads and publication. Review that additional declaration through the normal update flow. QA compares original file hashes against the downloaded snapshot before and after executing tests, rejects modified/missing source and symbolic links, and keeps generated reports local. Remote workspace inspection remains an additional check.
 
 ## Reliable QA report submission (2.4.7)
+
+Version 5.2.1 binds the report's source commit in code to the verified assigned
+workspace. The model supplies the verdict, commands, findings and criteria, not
+the hash. Matching legacy identity arguments remain compatible; conflicting ones
+are explicitly rejected, never silently corrected. Validation feedback identifies
+the failing field and remaining submission attempts. If the model stops after a
+rejection, the ticket retains the actual submission error instead of claiming no
+submission occurred. Exact-source rechecks and independent browser evidence still
+gate acceptance; no new authority or automatic pass is introduced.
 
 The local `submit_qa_report` tool records evidence at the fixed `.csweet/qa-outcome.json` path after checking the assigned commit, actual validation commands, verdict consistency, and complete criterion coverage. It treats report strings as data rather than shell commands. Confined reads do not request unattended approval; generic file writes are still not automatically approved. Source integrity is independently checked after validation. Missing reports and pending tool approvals produce specific blockers. No new platform grants are requested, and absent measurements are never treated as passing evidence.
 

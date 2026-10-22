@@ -69,6 +69,7 @@ public sealed class GameQaReportTests : IDisposable
     [Theory]
     [InlineData("flat")]
     [InlineData("repair")]
+    [InlineData("assigned-source")]
     public async Task ReportSubmissionWorksThroughTheActualHarness(string format)
     {
         Directory.CreateDirectory(root);
@@ -101,6 +102,7 @@ public sealed class GameQaReportTests : IDisposable
             if (format == "exhaust" || calls == 1 || format == "repair" && calls == 2)
             {
                 var arguments = WireArguments("flat");
+                if (format == "assigned-source") arguments.Remove("sourceCommitSha");
                 if (format == "exhaust") arguments["passed"] = true;
                 if (format == "repair" && calls == 1) arguments["criteria"] = JsonSerializer.SerializeToElement(Array.Empty<object>());
                 if (format == "repair" && calls == 2)
@@ -159,7 +161,7 @@ public sealed class GameQaReportTests : IDisposable
         await File.WriteAllTextAsync(source, "original source");
         var report = Report() with { Findings = ["Do not run sudo; git push; $(touch sentinel); /proc is unavailable"] };
         var tool = GameQaReport.CreateTool(root, Sha, ["Record desktop fps"]);
-        Assert.True(tool.JsonSchema.GetProperty("properties").TryGetProperty("sourceCommitSha", out _));
+        Assert.False(tool.JsonSchema.GetProperty("properties").TryGetProperty("sourceCommitSha", out _));
         Assert.False(tool.JsonSchema.GetProperty("properties").TryGetProperty("report", out _));
         // Model tool arguments arrive as JSON, not preconstructed CLR records.
         await tool.InvokeAsync(Flat(report));
@@ -201,6 +203,68 @@ public sealed class GameQaReportTests : IDisposable
         var second=Assert.IsType<GameQaReport.Submission>(await tool.InvokeAsync(Flat(Report(true))));
         Assert.Equal("already-saved",second.Code);
         Assert.False((await GameQaReport.ReadAsync(root,default)).Passed);
+    }
+
+    [Fact]
+    public async Task AssignedShaIsCodeOwnedAndMatchingLegacyIdentityRemainsCompatible()
+    {
+        var assigned = "4d3c2c392b2593080beaa485f7898edaf7114edf";
+        var arguments = Flat(Report() with { SourceCommitSha = assigned });
+        arguments.Remove("sourceCommitSha");
+        var tool = GameQaReport.CreateTool(root, assigned, ["Record desktop fps"]);
+        await tool.InvokeAsync(arguments);
+        Assert.Equal(assigned, (await GameQaReport.ReadAsync(root, default)).SourceCommitSha);
+        GameQaReport.Reset(root);
+        await GameQaReport.CreateTool(root, assigned, ["Record desktop fps"])
+            .InvokeAsync(Flat(Report() with { SourceCommitSha = assigned.ToUpperInvariant() }));
+        Assert.Equal(assigned, (await GameQaReport.ReadAsync(root, default)).SourceCommitSha);
+    }
+
+    [Theory]
+    [InlineData("4d3c2c392b2593080beaa485f7898edaf114edf")]
+    [InlineData("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")]
+    public async Task RejectedIdentityExplainsTheExactFieldAndSurvivesAnEarlyModelStop(string wrong)
+    {
+        var assigned = "4d3c2c392b2593080beaa485f7898edaf7114edf";
+        using var budget = new GameQaReport.CorrectionBudget(default);
+        var feedback = Assert.IsType<GameQaReport.Submission>(await GameQaReport.CreateTool(root, assigned,
+            ["Record desktop fps"], budget).InvokeAsync(Flat(Report() with { SourceCommitSha = wrong })));
+        Assert.False(feedback.Saved);
+        Assert.Contains("sourceCommitSha does not match", feedback.Message);
+        Assert.Contains(assigned, feedback.Message);
+        Assert.Contains("3 submission attempts remain", feedback.Message);
+        var stopped = await Assert.ThrowsAsync<InvalidOperationException>(() => GameQaReport.ReadAsync(root, default, budget.LastRejection));
+        Assert.Contains("report.invalid-evidence", stopped.Message);
+        Assert.Contains("sourceCommitSha does not match", stopped.Message);
+        Assert.DoesNotContain("without submitting", stopped.Message);
+        Assert.False(File.Exists(Path.Combine(root, ".csweet", "qa-outcome.json")));
+    }
+
+    [Theory]
+    [InlineData("summary")]
+    [InlineData("validations")]
+    [InlineData("criteria")]
+    public async Task InvalidArgumentDiagnosticsNameTheRejectedField(string field)
+    {
+        using var budget = new GameQaReport.CorrectionBudget(default);
+        var arguments = Flat(Report()); arguments.Remove(field);
+        var feedback = Assert.IsType<GameQaReport.Submission>(await GameQaReport.CreateTool(root, Sha,
+            ["Record desktop fps"], budget).InvokeAsync(arguments));
+        Assert.Contains(field, feedback.Message);
+        var stopped = await Assert.ThrowsAsync<InvalidOperationException>(() => GameQaReport.ReadAsync(root, default, budget.LastRejection));
+        Assert.Contains("report.invalid-arguments", stopped.Message);
+        Assert.Contains(field, stopped.Message);
+    }
+
+    [Fact]
+    public void OutcomeValidationDistinguishesIdentityFromMissingCommands()
+    {
+        var wrong = Assert.Throws<InvalidOperationException>(() => GameQaExecution.ValidateOutcome(Report() with { SourceCommitSha = new('b', 40) }, Sha));
+        Assert.Contains("sourceCommitSha", wrong.Message);
+        Assert.DoesNotContain("executed commands", wrong.Message);
+        var commands = Assert.Throws<InvalidOperationException>(() => GameQaExecution.ValidateOutcome(Report() with { Validations = [] }, Sha));
+        Assert.Contains("validations", commands.Message);
+        Assert.DoesNotContain("sourceCommitSha", commands.Message);
     }
 
     [Fact]

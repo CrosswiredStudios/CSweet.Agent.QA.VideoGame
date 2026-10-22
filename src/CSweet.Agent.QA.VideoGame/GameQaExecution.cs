@@ -108,7 +108,7 @@ public sealed partial class SpecialistAgent
             if (approval is not null)
                 throw new InvalidOperationException("C-Sweet QA encountered an unsupported interactive tool approval. " +
                     "Observed commands are preserved in journal " + journal.Key + ". No approval or QA verdict was granted; escalate the harness configuration to management.");
-            var outcome = await GameQaReport.ReadAsync(path, token);
+            var outcome = await GameQaReport.ReadAsync(path, token, reportBudget.LastRejection);
             var verdict = GameQaExecution.ValidateOutcome(outcome, prepared.Commit);
             GameQaExecution.ValidateCriterionCoverage(outcome!, input.Planning!.AcceptanceCriteria);
             await prepared.VerifyAsync(assignment, context, token);
@@ -240,7 +240,8 @@ internal static partial class GameQaExecution
         checks and real failures with their original provenance; recheck environment-dependent claims as needed. They
         never prove unavailable browser/device checks passed and never authorize a scope change.
         Submit the final report using submit_qa_report. Do not write the report through a shell command or generic
-        file-write tool. The submission tool saves .csweet/qa-outcome.json with sourceCommitSha, summary, passed (boolean), validations (array of command,
+        file-write tool. Omit sourceCommitSha from the tool arguments; code supplies the exact assigned commit from the verified workspace.
+        Do not retype hashes into evidence prose; refer to the assigned commit. The submission tool saves .csweet/qa-outcome.json with sourceCommitSha, summary, passed (boolean), validations (array of command,
         succeeded, exitCode, diagnosticExcerpt), and findings (array). Report actual command output and reproducible
         defects. Also include criteria (array of criterion, satisfied, evidence), covering each exact assigned acceptance
         criterion once with actual observed evidence. Assess required environments and delivery scope described in the
@@ -264,14 +265,17 @@ internal static partial class GameQaExecution
     internal static string ValidateOutcome(GameQaOutcome? outcome, string expectedCommit)
     {
         RequireCommit(expectedCommit);
-        if (outcome is null || !string.Equals(outcome.SourceCommitSha, expectedCommit, StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(outcome.Summary) || outcome.Validations is not { Count: > 0 } || outcome.Findings is null ||
-            outcome.Validations.Any(x => x is null || string.IsNullOrWhiteSpace(x.Command)))
-            throw new InvalidOperationException("QA evidence must identify the exact commit and executed validation commands.");
+        if (outcome is null) throw new InvalidOperationException("The QA report is missing.");
         var issues = new List<string>();
-        if (outcome.Passed && outcome.Validations.Any(x => !x.Succeeded || x.ExitCode != 0))
+        if (!string.Equals(outcome.SourceCommitSha, expectedCommit, StringComparison.OrdinalIgnoreCase))
+            issues.Add($"sourceCommitSha must match the assigned commit {expectedCommit}; the report identifies different source.");
+        if (string.IsNullOrWhiteSpace(outcome.Summary)) issues.Add("summary must describe the observed QA result.");
+        if (outcome.Validations is not { Count: > 0 } || outcome.Validations.Any(x => x is null || string.IsNullOrWhiteSpace(x.Command)))
+            issues.Add("validations must contain executed commands with nonempty command fields.");
+        if (outcome.Findings is null) issues.Add("findings must be an array of unresolved blockers, or [] when none remain.");
+        if (outcome.Passed && outcome.Validations?.Any(x => x is not null && (!x.Succeeded || x.ExitCode != 0)) == true)
             issues.Add("passed=true conflicts with failed validation commands; report passed=false and preserve the failed results.");
-        if (outcome.Passed && outcome.Findings.Count > 0)
+        if (outcome.Passed && outcome.Findings is { Count: > 0 })
             issues.Add("passed=true requires findings=[]. findings contains unresolved BLOCKERS only. Move nonblocking observations and optional verification notes into summary, not findings. Preserve real defects and use passed=false when blockers remain.");
         if (issues.Count != 0) throw new InvalidOperationException(string.Join("; ", issues));
         return outcome.Passed ? "passed" : "failed";

@@ -11,10 +11,10 @@ internal static class GameQaReport
     internal static AIFunction CreateTool(string workspace, string commit, IReadOnlyList<string> requiredCriteria, CorrectionBudget? budget = null,
         Func<GameQaOutcome, CancellationToken, Task>? checkpoint = null) =>
         new ReportFunction(AIFunctionFactory.Create(
-            async (string sourceCommitSha, string summary, bool passed, IReadOnlyList<GitValidationResult> validations,
+            async (string summary, bool passed, IReadOnlyList<GitValidationResult> validations,
                 IReadOnlyList<string> findings, IReadOnlyList<GameQaCriterion> criteria, CancellationToken cancellationToken) =>
             {
-                var report = new GameQaOutcome(sourceCommitSha, summary, passed, validations, findings) { Criteria = criteria };
+                var report = new GameQaOutcome(commit, summary, passed, validations, findings) { Criteria = criteria };
                 // The destination and source identity come from the assignment, never model arguments.
                 GameQaExecution.ValidateOutcome(report, commit);
                 var path = ReportPath(workspace);
@@ -24,7 +24,7 @@ internal static class GameQaReport
                 return new Submission(true, "saved", "QA report saved. Source-integrity checks and delivery gates still apply.");
             },
             "submit_qa_report",
-            "Save the final independent QA report for the assigned commit. Supply sourceCommitSha, summary, passed, validations, findings and criteria directly as named arguments. Include ONLY the exact supplied acceptance criteria, once each, and actual command results. findings contains unresolved blockers only; passed=true REQUIRES findings=[]. Keep nonblocking observations and optional verification notes in summary. Never erase a real defect to pass: report passed=false instead. Set a required criterion's unverifiable=true (with satisfied=false) only when its evidence needs an unavailable environment; do not add extra criteria. This writes only the designated report, never source files."), commit, requiredCriteria, budget);
+            "Save the final independent QA report for the assigned commit. The verified workspace supplies sourceCommitSha in code; do not supply or retype it. Supply summary, passed, validations, findings and criteria directly as named arguments. Include ONLY the exact supplied acceptance criteria, once each, and actual command results. findings contains unresolved blockers only; passed=true REQUIRES findings=[]. Keep nonblocking observations and optional verification notes in summary. Never erase a real defect to pass: report passed=false instead. Set a required criterion's unverifiable=true (with satisfied=false) only when its evidence needs an unavailable environment; do not add extra criteria. This writes only the designated report, never source files."), commit, requiredCriteria, budget);
 
     internal sealed class CorrectionBudget(CancellationToken token) : IDisposable
     {
@@ -33,10 +33,17 @@ internal static class GameQaReport
         internal bool Exhausted { get; private set; }
         internal CancellationToken Token => stop.Token;
         internal string FailureMessage { get; private set; } = "";
+        internal Submission? LastRejection { get; private set; }
+        internal Submission RecordFailure(Submission feedback)
+        {
+            LastRejection = feedback;
+            return feedback;
+        }
         internal Submission Reject(Submission feedback)
         {
             invalid++;
-            if (invalid < 4) return feedback with { Message = feedback.Message + $" Correct all listed issues together; correction {invalid}/3. Preserve actual defects and executed evidence." };
+            RecordFailure(feedback);
+            if (invalid < 4) return feedback with { Message = feedback.Message + $" Correct all listed issues together; {4 - invalid} submission attempts remain. Preserve actual defects and executed evidence." };
             Exhausted = true;
             FailureMessage = "C-Sweet QA report validation exhausted three corrections. No QA verdict was accepted. " +
                 "Escalate this report-processing issue to management for code correction. " + feedback.Message;
@@ -63,7 +70,7 @@ internal static class GameQaReport
             if(saved) return new Submission(true,"already-saved","The first validated report and its observations are retained. Finish this QA turn; do not replace its verdict.");
             try
             {
-                var normalized = NormalizeArguments(arguments);
+                var normalized = NormalizeArguments(arguments, commit);
                 var report = JsonSerializer.Deserialize<GameQaOutcome>(JsonSerializer.Serialize(normalized, JsonOptions), JsonOptions);
                 var issues = new List<string>();
                 try { GameQaExecution.ValidateOutcome(report, commit); }
@@ -74,6 +81,7 @@ internal static class GameQaReport
                     catch (InvalidOperationException error) { issues.Add(error.Message); }
                 }
                 if (issues.Count != 0) throw new InvalidOperationException(string.Join("; ", issues));
+                normalized.Remove("sourceCommitSha");
                 var result=await InnerFunction.InvokeAsync(normalized, cancellationToken);
                 saved=true;
                 return result;
@@ -81,7 +89,7 @@ internal static class GameQaReport
             catch (Exception error) when (error is JsonException or ArgumentException)
             {
                 return Reject(new Submission(false, "report.invalid-arguments",
-                    "Supply sourceCommitSha and summary as strings, passed as a JSON boolean, and validations, findings and criteria as JSON arrays. Do not omit fields or change evidence to make submission succeed.", criteria));
+                    $"Invalid report arguments: {error.Message} Supply summary as a string, passed as a JSON boolean, and validations, findings and criteria as JSON arrays. The assigned sourceCommitSha is supplied by code. Do not change evidence to make submission succeed.", criteria));
             }
             catch (InvalidOperationException error)
             {
@@ -89,29 +97,38 @@ internal static class GameQaReport
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
-                return new Submission(false, "report.write-failed", $"The QA report could not be saved ({error.GetType().Name}). No verdict was accepted.");
+                var failure = new Submission(false, "report.write-failed", $"The QA report could not be saved ({error.GetType().Name}). No verdict was accepted.");
+                return budget?.RecordFailure(failure) ?? failure;
             }
         }
         private Submission Reject(Submission feedback) => budget?.Reject(feedback) ?? feedback;
     }
 
-    internal static AIFunctionArguments NormalizeArguments(AIFunctionArguments arguments)
+    internal static AIFunctionArguments NormalizeArguments(AIFunctionArguments arguments, string commit)
     {
-        var normalized = new AIFunctionArguments();
-        foreach (var field in new[] { "sourceCommitSha", "summary", "passed", "validations", "findings", "criteria" })
+        GameQaExecution.RequireCommit(commit);
+        if (arguments.TryGetValue("sourceCommitSha", out var supplied))
         {
-            if (!arguments.TryGetValue(field, out var value)) throw new ArgumentException("Missing report field.");
+            var identity = JsonSerializer.SerializeToElement(supplied, JsonOptions);
+            if (identity.ValueKind != JsonValueKind.String || !string.Equals(identity.GetString(), commit, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"sourceCommitSha does not match the assigned commit {commit}. Omit sourceCommitSha; the verified workspace supplies it. No report was saved.");
+        }
+        var normalized = new AIFunctionArguments();
+        foreach (var field in new[] { "summary", "passed", "validations", "findings", "criteria" })
+        {
+            if (!arguments.TryGetValue(field, out var value)) throw new ArgumentException($"Missing required report field '{field}'.");
             var json = JsonSerializer.SerializeToElement(value, JsonOptions);
             var valid = field switch
             {
-                "sourceCommitSha" or "summary" => json.ValueKind == JsonValueKind.String,
+                "summary" => json.ValueKind == JsonValueKind.String,
                 "passed" => json.ValueKind is JsonValueKind.True or JsonValueKind.False,
                 _ => json.ValueKind == JsonValueKind.Array
             };
-            if (!valid) throw new ArgumentException("Incorrect report field type.");
+            if (!valid) throw new ArgumentException($"Report field '{field}' has an incorrect JSON type ({json.ValueKind}).");
             normalized[field] = json;
         }
-        if (arguments.Count != normalized.Count) throw new ArgumentException("Unknown report fields.");
+        if (arguments.Keys.Any(field => field != "sourceCommitSha" && !normalized.ContainsKey(field))) throw new ArgumentException("Unknown report fields.");
+        normalized["sourceCommitSha"] = commit;
         return normalized;
     }
 
@@ -121,11 +138,15 @@ internal static class GameQaReport
         if (File.Exists(path)) File.Delete(path);
     }
 
-    internal static async Task<GameQaOutcome> ReadAsync(string workspace, CancellationToken token)
+    internal static async Task<GameQaOutcome> ReadAsync(string workspace, CancellationToken token, Submission? rejection = null)
     {
         var path = ReportPath(workspace);
         if (!File.Exists(path))
+        {
+            if (rejection is not null)
+                throw new InvalidOperationException($"QA report submission was rejected ({rejection.Code}): {rejection.Message} No validation verdict was accepted.");
             throw new InvalidOperationException("QA stopped without submitting its structured report. No validation verdict was accepted; rerun QA with the report-submission tool.");
+        }
         try
         {
             return JsonSerializer.Deserialize<GameQaOutcome>(await File.ReadAllTextAsync(path, token), JsonOptions)
