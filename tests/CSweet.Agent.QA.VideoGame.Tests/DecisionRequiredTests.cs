@@ -74,12 +74,36 @@ public sealed class DecisionRequiredTests
     }
 
     [Fact]
+    public void Missing_environment_is_visible_even_after_a_long_passing_evidence_prefix()
+    {
+        var criterion = new GameQaCriterion("Verify browser loading", false,
+            string.Concat(Enumerable.Repeat("Build and static checks passed. ", 40)) +
+            "Firefox and Safari cannot be executed in this sandbox; test_web_build provides Chromium only.", true);
+        var outcome = GameQaExecution.DecisionOutcome(Assignment(), Report(true, criterion));
+        Assert.Contains("Firefox and Safari cannot be executed", outcome.Summary);
+        Assert.DoesNotContain("Build and static checks passed", outcome.Summary);
+        Assert.DoesNotContain("any available role", outcome.Summary);
+        Assert.Contains("Then retry this QA stage", outcome.Summary);
+        Assert.Equal(criterion.Evidence, outcome.Output.GetProperty("Criteria")[0].GetProperty("Evidence").GetString());
+    }
+
+    [Fact]
+    public void Structured_missing_evidence_is_kept_separate_from_successful_checks()
+    {
+        var criterion = new GameQaCriterion("Measure audio", false, "Build passed. " + new string('x', 1000), true,
+            "An audio capture device is unavailable.");
+        Assert.Equal("An audio capture device is unavailable.", GameQaExecution.DecisionGap(criterion));
+    }
+
+    [Fact]
     public void Decision_summary_fits_the_platform_block_reason()
     {
         var many = Enumerable.Range(1, 30).Select(i =>
             new GameQaCriterion($"Criterion {i} " + new string('x', 300), false, new string('y', 400), Unverifiable: true)).ToArray();
         var outcome = GameQaExecution.DecisionOutcome(Assignment(), Report(true, many));
         Assert.True(outcome.Summary.Length <= 3500);
+        Assert.Contains("Then retry this QA stage", outcome.Summary);
+        Assert.Contains("additional gaps", outcome.Summary);
     }
 
     [Fact]

@@ -162,7 +162,8 @@ internal sealed record GameQaOutcome(string SourceCommitSha, string Summary, boo
 }
 /// <param name="Unverifiable">True when the criterion could not be evaluated because its evidence needs a device, browser,
 /// network, service or tool unavailable to every role here. It is never satisfied and is not a product defect.</param>
-internal sealed record GameQaCriterion(string Criterion, bool Satisfied, string Evidence, bool Unverifiable = false);
+internal sealed record GameQaCriterion(string Criterion, bool Satisfied, string Evidence, bool Unverifiable = false,
+    string? MissingEvidence = null);
 internal static partial class GameQaExecution
 {
     internal static WorkItemDeliverySpecification RequireCurrentSource(WorkExecutionAssignment assignment, WorkItem item, string installationId, bool standalone)
@@ -254,7 +255,9 @@ internal static partial class GameQaExecution
         engineer could have produced in the repository makes its criterion unmet (satisfied=false, unverifiable=false).
         When a criterion cannot be evaluated because its evidence requires a device, browser, network, registry, service or
         tool that is unavailable in this environment, set satisfied=false and unverifiable=true and state exactly what is
-        missing. Never mark it satisfied and never invent a measurement. QA whose only gaps are unverifiable criteria is sent
+        missing in a separate missingEvidence field, starting with the unavailable check or environment rather than
+        successful checks. Chromium evidence proves only the executed Chromium checks, not Chrome, Edge or mobile-device
+        certification. Never mark it satisfied and never invent a measurement. QA whose only gaps are unverifiable criteria is sent
         to the Producer as a decision (defer the check or provide the environment), not back to engineering as a failure.
         """;
     internal static void RequireCommit(string? commit)
@@ -304,9 +307,10 @@ internal static partial class GameQaExecution
             .Append($"Decision needed on {assignment.Identifier}: QA validated `{outcome.SourceCommitSha}` as far as this environment allows ")
             .Append("and found no product defect, but ")
             .Append(unverifiable.Length == 1 ? "one acceptance criterion" : $"{unverifiable.Length} acceptance criteria")
-            .Append(" cannot be verified by any available role:\n");
-        foreach (var criterion in unverifiable)
-            text.Append($"- {Excerpt(criterion.Criterion, 300)} — {Excerpt(criterion.Evidence, 400)}\n");
+            .Append(" cannot be verified in the assigned QA environment:\n");
+        foreach (var criterion in unverifiable.Take(3))
+            text.Append($"- Missing verification: {Excerpt(DecisionGap(criterion), 550)} Required criterion: {Excerpt(criterion.Criterion, 200)}\n");
+        if (unverifiable.Length > 3) text.Append($"{unverifiable.Length - 3} additional gaps are retained in the full QA report.\n");
         text.Append("\nOptions: defer or amend these criteria as explicit follow-up work, or provide the missing environment or tooling. ")
             .Append("Then retry this QA stage; the candidate does not need to return to engineering for these gaps.");
         var summary = text.ToString();
@@ -322,5 +326,18 @@ internal static partial class GameQaExecution
     {
         value = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
         return value.Length <= length ? value : value[..(length - 3)] + "...";
+    }
+
+    // Older retained reports have no separate missingEvidence. Prefer their gap sentences
+    // over a prefix of successful build results; the complete original remains in Output.
+    internal static string DecisionGap(GameQaCriterion criterion)
+    {
+        if (!string.IsNullOrWhiteSpace(criterion.MissingEvidence)) return Excerpt(criterion.MissingEvidence, 700);
+        var sentences = System.Text.RegularExpressions.Regex.Split(criterion.Evidence, @"(?<=[.!?;])\s+|[\r\n]+");
+        var gaps = sentences.Where(x => System.Text.RegularExpressions.Regex.IsMatch(x,
+            @"\b(unavailable|unreachable|missing|cannot|can't|not available|not installed|not supported|Chromium only)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase)).ToArray();
+        return gaps.Length > 0 ? Excerpt(string.Join(" ", gaps), 700)
+            : "The required check could not be performed. See the full QA report for the recorded evidence.";
     }
 }
