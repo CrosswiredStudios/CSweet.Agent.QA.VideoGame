@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.2.2`
+- Version: `5.2.3`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -178,3 +178,10 @@ Unattended QA disables generic file-write/edit/delete tools. `save_qa_test_plan`
 ## Artifact criterion correction (5.0.1)
 
 SDK 5.0.2 applies bounded JSON correction to the separate artifact-review path. The result must quote each exact acceptance criterion once; requirements and review checklists are evaluated in evidence, summary and findings. Identity, criterion coverage and verdict consistency receive specific correction feedback. Up to three corrections preserve actual defects and use the same delivered revision; current planning and document authorization are checked again before a verdict is returned. Exhaustion is reported to management as a C-Sweet artifact-QA processing issue.
+
+## Browser upload recovery (5.2.3)
+
+An unknown build-upload outcome triggers a read-only probe of that exact retained part. Matching bytes
+allow continuation; a matching incomplete prefix can be completed by a guarded write of the same part.
+Conflicting bytes stop recovery. Two probe cycles bound this recovery. Browser tests and unrelated
+commands with unknown outcomes remain blocked for a decision and are never replayed by this path.

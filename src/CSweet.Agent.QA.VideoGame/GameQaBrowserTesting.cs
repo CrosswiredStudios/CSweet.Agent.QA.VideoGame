@@ -130,11 +130,43 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
                 current.Generation != operation.Generation)
                 throw new InvalidOperationException("Browser compute returned a different operation identity.");
             if (operation.Status is "Pending" or "Dispatching" or "Reconciling") return;
+            if (operation.Status == "Completed" && operation.Result?.ErrorCode == "outcome-unknown" &&
+                request.Kind is "upload" or "repair-upload")
+            {
+                if (state.UploadRecoveries >= 2) throw new InvalidOperationException("Browser upload recovery exceeded its bounded verification budget.");
+                var bytes = await UploadPartAsync(token);
+                var rootPath = "/var/lib/csweet-compute/work/browser-" + state.BuildSha256 + "/build.zip";
+                var script = "python3 -c \"import hashlib,json; f=open('" + rootPath + "','rb'); f.seek(" + state.UploadOffset +
+                    "); b=f.read(" + bytes.Length + "); print(json.dumps(dict(length=len(b),sha256=hashlib.sha256(b).hexdigest())))\"";
+                await RecoverUploadAsync("verify-upload", script, request.NextOffset, current.Generation,
+                    $"{key}:verify-upload:{operation.Id:N}", token);
+                return;
+            }
             if (operation.Status != "Completed" || operation.Result is not
                 { ErrorCode: null, Command: { ExitCode: 0, TimedOut: false, Truncated: false, ErrorCode: null } output } ||
                 output.RequestId != request.RequestId)
                 throw new InvalidOperationException("Browser testing could not complete; no pass was recorded: " +
                     (operation.Result?.Command?.StandardErrorText ?? operation.Result?.ErrorCode ?? operation.FailureCode));
+            if (request.Kind == "verify-upload")
+            {
+                var bytes = await UploadPartAsync(token);
+                var proof = JsonSerializer.Deserialize<UploadProbe>(output.StandardOutputText, Json);
+                if (proof is null || proof.Length < 0 || proof.Length > bytes.Length ||
+                    proof.Sha256 != Convert.ToHexStringLower(SHA256.HashData(bytes.AsSpan(0,proof.Length))))
+                    throw new InvalidOperationException("The uncertain browser upload differs from the pinned build; no bytes were overwritten.");
+                if (proof.Length < bytes.Length)
+                {
+                    var rootPath = "/var/lib/csweet-compute/work/browser-" + state.BuildSha256 + "/build.zip";
+                    // Recheck the observed prefix inside the repair operation before writing the exact
+                    // retained part. A browser test is never replayed through this upload-only path.
+                    var script = "python3 -c \"import base64,hashlib; b=base64.b64decode('" + Convert.ToBase64String(bytes) +
+                        "'); f=open('" + rootPath + "','r+b'); f.seek(" + state.UploadOffset + "); p=f.read(len(b)); " +
+                        "assert len(p) <= len(b) and p == b[:len(p)], 'upload prefix changed'; f.seek(" + state.UploadOffset + "); f.write(b); f.flush()\"";
+                    await RecoverUploadAsync("repair-upload",script,request.NextOffset,current.Generation,
+                        $"{key}:repair-upload:{operation.Id:N}",token);
+                    return;
+                }
+            }
             if (request.Kind == "test")
             {
                 var report = JsonSerializer.Deserialize<BrowserReport>(output.StandardOutputText, Json) ?? throw new InvalidOperationException("Missing browser result.");
@@ -210,6 +242,25 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         }
     }
 
+    private async Task<byte[]> UploadPartAsync(CancellationToken token)
+    {
+        var part = await context.Platform.ReadOperatingStateAsync<ArchivePart>($"qbb:{state!.BuildSha256}:{state.UploadOffset}", token)
+            ?? throw new InvalidOperationException("The pinned browser build part is missing.");
+        return Convert.FromBase64String(part.Payload.Base64);
+    }
+
+    private async Task RecoverUploadAsync(string kind, string script, int nextOffset, long generation, string idempotencyKey, CancellationToken token)
+    {
+        var requestId = Guid.NewGuid();
+        var next = new BrowserRequest(requestId,kind,generation,idempotencyKey,JsonSerializer.SerializeToElement(new {
+            command = new ComputeCommand(requestId,"/bin/sh","/var/lib/csweet-compute/work",["-c","set -eu\n"+script],30,8192)
+        },Json),nextOffset);
+        state = state! with { Pending=next, OperationId=null, UploadRecoveries=state.UploadRecoveries+(kind == "verify-upload" ? 1 : 0) };
+        await SaveAsync(token);
+        var operation = await SubmitAsync(next,token);
+        state = state with { OperationId=operation.Id }; await SaveAsync(token);
+    }
+
     private Task<ComputeOperation> SubmitAsync(BrowserRequest request, CancellationToken token) =>
         context.Platform.InvokeAsync<object, ComputeOperation>(ComputeCapabilities.Execute,
             new { environmentId = state!.EnvironmentId, request.ExpectedGeneration, request.IdempotencyKey, workload = request.Workload }, token);
@@ -270,11 +321,12 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             throw new InvalidOperationException("Browser results do not bind the exact build, viewports and executed checks.");
     }
 
+    internal sealed record UploadProbe(int Length, string Sha256);
     internal sealed record ArchivePart(string Base64);
     internal sealed record BrowserState(string Commit, string SourceIdentity, string BuildSha256, int BuildBytes,
         IReadOnlyList<int> Widths, bool RequireWebGl, Guid? EnvironmentId = null, int Step = 0, int UploadOffset = 0,
         BrowserRequest? Pending = null, Guid? OperationId = null, BrowserReport? Report = null, int EvidenceOffset = 0, bool Complete = false,
-        Guid? TestOperationId = null, int Cursor = 0);
+        Guid? TestOperationId = null, int Cursor = 0, int UploadRecoveries = 0);
     internal sealed record BrowserRequest(Guid RequestId, string Kind, long ExpectedGeneration, string IdempotencyKey, JsonElement Workload, int NextOffset);
     internal sealed record BrowserReport(Guid RequestId, string SourceCommitSha, string BuildSha256, string BrowserVersion,
         bool Passed, IReadOnlyList<ViewportResult> Viewports, string EvidenceSha256, int EvidenceBytes);

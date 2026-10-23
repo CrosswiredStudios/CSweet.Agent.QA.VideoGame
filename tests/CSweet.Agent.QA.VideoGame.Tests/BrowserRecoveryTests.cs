@@ -14,7 +14,21 @@ public sealed class BrowserRecoveryTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Lost_browser_submission_reuses_the_exact_operation_and_retains_evidence_before_qa_resumes(bool lostBeforeAcceptance)
+    public Task Lost_browser_submission_reuses_the_exact_operation_and_retains_evidence_before_qa_resumes(bool lostBeforeAcceptance)
+        => RunRecoveryAsync(lostBeforeAcceptance,"none");
+
+    [Theory]
+    [InlineData("uploaded")]
+    [InlineData("missing")]
+    public Task Unknown_upload_requires_exact_read_back_before_continuing(string scenario) => RunRecoveryAsync(true,scenario);
+
+    [Theory]
+    [InlineData("conflicting")]
+    [InlineData("browser")]
+    public Task Unknown_browser_execution_or_conflicting_upload_never_replays(string scenario) =>
+        Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(true,scenario));
+
+    private async Task RunRecoveryAsync(bool lostBeforeAcceptance,string scenario)
     {
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var states = new Dictionary<string, AgentOperatingStateResponse>();
@@ -26,6 +40,7 @@ public sealed class BrowserRecoveryTests
         var operations = new Dictionary<Guid, ComputeOperation>();
         var submissions = new Dictionary<string, (JsonElement Input, Guid Id)>();
         var browserLaunches = 0; var lostReply = false;
+        var unknownUpload = false; byte[] remotePart = []; var probes=0; var repairs=0;
         var evidence = Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
         var runtime = new AgentTestRuntime()
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
@@ -72,9 +87,34 @@ public sealed class BrowserRecoveryTests
                         Convert.ToHexStringLower(SHA256.HashData(evidence)), evidence.Length), json);
                 }
                 else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(evidence);
+                else if(key.Contains(":verify-upload:",StringComparison.Ordinal))
+                {
+                    probes++;
+                    output=JsonSerializer.Serialize(new GameQaBrowserTesting.UploadProbe(remotePart.Length,
+                        Convert.ToHexStringLower(SHA256.HashData(remotePart))),json);
+                }
+                else if(key.Contains(":repair-upload:",StringComparison.Ordinal))
+                {
+                    repairs++;
+                    var match=System.Text.RegularExpressions.Regex.Match(command!.Arguments.Last(),"b64decode\\('([^']+)'\\)");
+                    remotePart=Convert.FromBase64String(match.Groups[1].Value);
+                }
+                else if(command!.Arguments.Last().Contains("base64 -d",StringComparison.Ordinal))
+                {
+                    var match=System.Text.RegularExpressions.Regex.Match(command.Arguments.Last(),"printf '%s' '([^']+)'");
+                    remotePart=Convert.FromBase64String(match.Groups[1].Value);
+                    if(!unknownUpload && scenario is "uploaded" or "missing" or "conflicting")
+                    {
+                        unknownUpload=true;
+                        if(scenario == "missing") remotePart=[];
+                        if(scenario == "conflicting") remotePart=[1,2,3];
+                    }
+                }
                 environment = environment with { Generation = environment.Generation + 1 };
                 var operation = new ComputeOperation(Guid.NewGuid(), environmentId, environment.Generation, "Pending", null,
                     new(Command: new(requestId, 0, false, Encoding.UTF8.GetBytes(output), [])));
+                if ((unknownUpload && probes == 0 && !browser && command!.Arguments.Last().Contains("base64 -d",StringComparison.Ordinal)) ||
+                    browser && scenario == "browser") operation=operation with { Result=new(ErrorCode:"outcome-unknown") };
                 operations[operation.Id] = operation; submissions[key] = (request.Clone(), operation.Id);
                 if (browser && !lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission reply after acceptance"); }
                 return Task.FromResult(operation);
@@ -103,13 +143,15 @@ public sealed class BrowserRecoveryTests
             await testing.Tool().InvokeAsync(new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true });
             Assert.True(testing.Pending);
             Assert.Equal("awaiting-compute", testing.WaitOutcome().OutcomeCode);
-            for (var turn = 0; turn < 12 && testing.Pending; turn++) {
+            for (var turn = 0; turn < 18 && testing.Pending; turn++) {
                 testing = new GameQaBrowserTesting(assignment with { AttemptId = Guid.NewGuid() }, source, journal, context);
                 try { await testing.ResumeAsync(default); }
                 catch (IOException) when (lostReply) { continue; }
             }
             Assert.False(testing.Pending);
             Assert.Equal(1, browserLaunches);
+            Assert.Equal(scenario == "none" ? 0 : 1,probes);
+            Assert.Equal(scenario == "missing" ? 1 : 0,repairs);
             Assert.Contains("Observed browser compute evidence", testing.Evidence);
             Assert.Equal(3, testing.ExecutionEvidence.Count);
             Assert.Contains("browser-artifact", await journal.ReadEvidenceAsync(default));
