@@ -32,6 +32,12 @@ internal static class GameQaReport
         private int invalid;
         internal bool Exhausted { get; private set; }
         internal GameQaOutcome? AcceptedReport { get; private set; }
+        internal bool ComputePending { get; private set; }
+        internal void PauseForCompute()
+        {
+            ComputePending=true;
+            stop.Cancel();
+        }
         internal void Accept(GameQaOutcome report)
         {
             if (!stopAfterSavedReport) return;
@@ -39,6 +45,8 @@ internal static class GameQaReport
             stop.Cancel();
         }
         internal bool IsReportCompletion(Exception error,CancellationToken outer) => AcceptedReport is not null &&
+            !outer.IsCancellationRequested && error is OperationCanceledException or HttpRequestException;
+        internal bool IsComputeCompletion(Exception error,CancellationToken outer) => ComputePending &&
             !outer.IsCancellationRequested && error is OperationCanceledException or HttpRequestException;
         internal CancellationToken Token => stop.Token;
         internal string FailureMessage { get; private set; } = "";

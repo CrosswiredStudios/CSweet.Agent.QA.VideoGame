@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.3.0`
+- Version: `5.3.1`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -215,3 +215,18 @@ digest-checked before QA resumes. Existing capabilities, grants and network requ
 
 Run `python scripts/test-browser-interactions.py` against the prepared browser image for real
 Chromium acceptance, in addition to the .NET tests and self-test.
+
+## Browser draft continuation (5.3.1)
+
+`save_browser_test_script` durably saves a content-addressed untracked test draft and returns its
+path. Source-bound drafts are restored after workspace replacement. Small legacy `qa/*.js`,
+`*.cjs` and `*.mjs` heredoc drafts can also be recovered as text from the integrity-checked command
+journal; no shell command is replayed and original source paths cannot be overwritten. This avoids
+reconstructing test scripts after every compute handoff and false shell-policy matches on event
+names such as `shutdown`. Generic writes and host-process commands remain restricted.
+
+A durably submitted compute wait ends model generation immediately, without an extra closing
+response. It grants no verdict and still requires current source/operation authority on resume.
+Focused script corrections retain evidence and do not have an arbitrary four-script stage limit;
+existing journal, workload and workflow budgets still bound work. Identical retained tests are
+observed, not physically replayed.

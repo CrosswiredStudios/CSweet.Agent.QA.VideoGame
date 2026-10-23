@@ -44,7 +44,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         await AdvanceAsync(token);
     }
 
-    internal AIFunction Tool() => AIFunctionFactory.Create(async (string buildDirectory, IReadOnlyList<int> viewportWidths,
+    internal AIFunction Tool(Action? onPending=null) => AIFunctionFactory.Create(async (string buildDirectory, IReadOnlyList<int> viewportWidths,
         bool requireWebGl, CancellationToken token) =>
     {
         if (state is null)
@@ -70,6 +70,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         else if (!state.Widths.SequenceEqual(viewportWidths) || state.RequireWebGl != requireWebGl)
             throw new InvalidOperationException("Resume the retained browser test with its original viewport and WebGL settings.");
         await AdvanceAsync(token);
+        if(Pending)onPending?.Invoke();
         return new { pending = Pending, evidence = Evidence, operationId = OperationId,
             instruction = Pending ? "Compute is running. Finish this turn; the platform resumes QA automatically. Do not poll or claim a browser pass." : "Assess the observed browser results against the exact acceptance criteria." };
     }, "test_web_build", "Test the actual static web build from this assigned source in isolated compute with Playwright and Chromium. First build the project, then supply its workspace-relative output directory (for example dist), viewportWidths (normally [375,1280]) and requireWebGl. Source and build hashes are bound by code. Returns pending while transferring/testing; finish the turn without a verdict and QA resumes automatically. Screenshots and traces are retained in the QA evidence journal. This smoke test does not establish gameplay, FPS or device compatibility.");

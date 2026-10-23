@@ -33,7 +33,7 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
             await store.MergeAsync<Part>(partKey,"video-game.qa-observation-part.v1",1,current=>current??part,
                 new Dictionary<string,string>(),partKey,token);
         }
-        var receipt=new Receipt(Identity,count,Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(data))));
+        var receipt=new Receipt(Identity,count,Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(data))),kind);
         await store.MergeAsync<Receipt>(key,"video-game.qa-observation.v1",1,current=>current??receipt,
             new Dictionary<string,string>(),key,token);
         await store.MergeAsync<Index>(Key,"video-game.qa-evidence-index.v1",1,current=> {
@@ -46,6 +46,20 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
         },new Dictionary<string,string>(),key+":index",token);
     }
     internal Task SaveReportAsync(GameQaOutcome report,CancellationToken token) => RecordAsync("validated-report","",report,token);
+    internal async Task<IReadOnlyList<Entry>> ReadScriptDraftsAsync(CancellationToken token)
+    {
+        var index=await ReadIndexAsync(token);var drafts=new List<Entry>();
+        foreach(var key in (index?.Entries??[]).TakeLast(32)) {
+            var receipt=(await platform.ReadOperatingStateAsync<Receipt>(key,token))?.Payload;
+            if(receipt is null||receipt.Identity!=Identity)throw new InvalidOperationException("QA draft receipt identity changed.");
+            // Legacy receipts lack kind. Only small legacy command drafts are considered;
+            // screenshots and binary traces are never materialized as executable tests.
+            if(receipt.Kind is not (null or "command" or "browser-test-script") || receipt.Kind is null && receipt.PartCount>2)continue;
+            var entry=await ReadEntryAsync(key,token);
+            if(entry.Kind is "command" or "browser-test-script")drafts.Add(entry);
+        }
+        return drafts;
+    }
     internal async Task<GameQaOutcome?> ReadReportAsync(CancellationToken token)
     {
         var index=await ReadIndexAsync(token);if(index?.ReportKey is not {} key)return null;
@@ -139,6 +153,6 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
     internal sealed record Entry(string Identity,Guid AttemptId,DateTimeOffset ObservedAt,string Kind,string Request,JsonElement Result);
     internal sealed record Index(string Identity,IReadOnlyList<string> Entries,string? ReportKey=null,Guid? ReportAttemptId=null);
     private sealed record Part(string Identity,string Data);
-    private sealed record Receipt(string Identity,int PartCount,string Sha256);
+    private sealed record Receipt(string Identity,int PartCount,string Sha256,string? Kind=null);
     private sealed record EvidencePage(bool Found,int Page,int Pages,string Json);
 }

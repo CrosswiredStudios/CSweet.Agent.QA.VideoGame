@@ -45,6 +45,8 @@ internal sealed class GameQaInputWorkspace : IAsyncDisposable
         }
         catch { await result.DisposeAsync(); throw; }
     }
+    internal bool IsOriginalFile(string relative) => hashes.Keys.Any(path =>
+        string.Equals(path.Replace('\\','/'),relative.Replace('\\','/'),StringComparison.OrdinalIgnoreCase));
     internal async Task VerifyAsync(WorkExecutionAssignment assignment, AgentRuntimeContext context, CancellationToken ct)
     {
         await GameQaWorkspace.VerifySourceUnchangedAsync(Path, hashes, ct);

@@ -68,6 +68,25 @@ public sealed class GameQaReportTests : IDisposable
     }
 
     [Fact]
+    public async Task DurableComputeWaitEndsHarnessWithoutClosingProseOrGrantingVerdict()
+    {
+        Directory.CreateDirectory(root);
+        using var budget=new GameQaReport.CorrectionBudget(default);
+        await using var shell=GameQaHarness.CreateShell(root);using var client=new ReportClient("compute");
+        var checkpointed=false;
+        var tool=AIFunctionFactory.Create(()=>{checkpointed=true;budget.PauseForCompute();return new{pending=true};},"start_pending_compute");
+        var harness=client.AsHarnessAgent(GameQaHarness.CreateOptions("QA",root,shell,null,interactionTool:tool));
+        var session=await harness.CreateSessionAsync();
+        var error=await Record.ExceptionAsync(()=>harness.RunAsync("Start compute",session,cancellationToken:budget.Token));
+        Assert.True(checkpointed);Assert.True(budget.ComputePending);Assert.Null(budget.AcceptedReport);Assert.Equal(1,client.Calls);
+        if(error is not null)Assert.True(budget.IsComputeCompletion(error,default));
+        Assert.True(budget.IsComputeCompletion(new HttpRequestException(),default));
+        using var shutdown=new CancellationTokenSource();shutdown.Cancel();
+        Assert.False(budget.IsComputeCompletion(new OperationCanceledException(),shutdown.Token));
+        Assert.False(budget.IsReportCompletion(new OperationCanceledException(),default));
+    }
+
+    [Fact]
     public async Task PassingReportGetsCombinedActionableBlockerAndCoverageFeedback()
     {
         var report = Report(true) with { Findings = ["[Non-blocking] Optional audible check"],
@@ -140,6 +159,10 @@ public sealed class GameQaReportTests : IDisposable
             foreach (var result in messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>())
                 Assert.DoesNotContain("Error", result.Result?.ToString() ?? "", StringComparison.OrdinalIgnoreCase);
             calls++;
+            if(format=="compute") {
+                yield return new(ChatRole.Assistant,[new FunctionCallContent("compute-"+calls,"start_pending_compute",new Dictionary<string,object?>())]);
+                yield break;
+            }
             if (format == "exhaust" || calls == 1 || format == "repair" && calls == 2)
             {
                 var arguments = WireArguments("flat");

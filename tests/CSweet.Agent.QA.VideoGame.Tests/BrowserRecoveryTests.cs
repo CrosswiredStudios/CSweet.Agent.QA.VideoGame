@@ -188,13 +188,25 @@ public sealed class BrowserRecoveryTests
                 Assert.False(behavior.Pending);Assert.False(behavior.Failed);Assert.Equal(1,interactionLaunches);
                 Assert.Contains("Observed independent Chromium behavior",behavior.Evidence);
                 Assert.Contains("browser-check-artifact",await journal.ReadEvidenceAsync(default));
-                await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// A separate focused check plan.");
-                await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
-                for(var turn=0;turn<10 && behavior.Pending;turn++) {
-                    behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
-                    await behavior.ResumeAsync(default);
+                for(var plan=2;plan<=5;plan++) {
+                    await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// A separate focused check plan "+plan);
+                    await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                    for(var turn=0;turn<10 && behavior.Pending;turn++) {
+                        behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
+                        await behavior.ResumeAsync(default);
+                    }
+                    Assert.False(behavior.Pending);Assert.Equal(plan,interactionLaunches);
                 }
-                Assert.False(behavior.Pending);Assert.Equal(2,interactionLaunches);
+                var scripts=new GameQaBrowserScripts(assignment,source,journal,context);
+                var body="// A shutdown event name is script data, not a shell command.\nawait page.goto(origin);";
+                var saved=await scripts.Tool().InvokeAsync(new AIFunctionArguments{["script"]=body});
+                var savedPath=JsonSerializer.SerializeToElement(saved).GetProperty("testScriptPath").GetString()!;
+                Assert.Equal(body,await File.ReadAllTextAsync(Path.Combine(source.Path,savedPath)));
+                File.Delete(Path.Combine(source.Path,savedPath));
+                await journal.RecordAsync("command",JsonSerializer.Serialize(new{command="cd /old/workspace && cat > qa/legacy.mjs <<'EOF'\nawait page.goto(origin);\nEOF\necho written"}),"exit_code: 0",default);
+                await scripts.RestoreAsync(default);
+                Assert.Equal(body,await File.ReadAllTextAsync(Path.Combine(source.Path,savedPath)));
+                Assert.Equal("await page.goto(origin);",await File.ReadAllTextAsync(Path.Combine(source.Path,"qa","legacy.mjs")));
                 await File.AppendAllTextAsync(Path.Combine(source.Path,"src","game.js"),"changed");
                 await Assert.ThrowsAsync<InvalidOperationException>(()=>behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"}).AsTask());
             }

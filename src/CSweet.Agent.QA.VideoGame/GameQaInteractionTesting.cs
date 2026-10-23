@@ -30,24 +30,24 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         ValidateBinding();
         await AdvanceAsync(token);
     }
-    internal AIFunction Tool() => AIFunctionFactory.Create(async (string testScriptPath,CancellationToken token) => {
+    internal AIFunction Tool(Action? onPending=null) => AIFunctionFactory.Create(async (string testScriptPath,CancellationToken token) => {
         var build = browser.CompletedBuild ?? throw new InvalidOperationException("First complete test_web_build for this source's production output.");
         await source.VerifyAsync(assignment,context,token);
         var script = await ReadScriptAsync(source.Path,testScriptPath,token);
         var hash = Hash(Encoding.UTF8.GetBytes(script));
         if(state is null || state.ScriptSha256!=hash) {
             if(state is {Complete:false})throw new InvalidOperationException("Resume the existing behavioral test before starting another.");
-            if((state?.Run??0)>=4)throw new InvalidOperationException("Four behavioral scripts have run in this stage. Preserve findings and request focused rework.");
             state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:(state?.Run??0)+1,Cursor:state?.Cursor??0);
             await SaveAsync(token);
             await journal.RecordAsync("browser-check-script",testScriptPath,new {state.ScriptSha256,script},token);
         }
         ValidateBinding();
         await AdvanceAsync(token);
+        if(Pending)onPending?.Invoke();
         return new {pending=Pending,evidence=Evidence,instruction=Pending ?
             "Finish the turn without a verdict; compute events resume QA. Do not poll." :
             "Assess each actual assertion against its exact criterion. Static checks and mocks do not establish browser behavior."};
-    },"test_web_interactions","Run independent Playwright assertions against the exact production build already tested by test_web_build. Write an untracked UTF-8 test script inside this workspace and supply testScriptPath. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString). Use await page.goto(origin), Playwright input/viewport operations and page.evaluate for real browser measurements. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Call check for each observed assertion (up to 24 unique names). Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into separate focused scripts (up to four per stage). Screenshots, trace, exact test script and result are retained. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
+    },"test_web_interactions","Run independent Playwright assertions against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString). Use await page.goto(origin), Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate accepts one serialized argument: pass an object for multiple values. Phaser lifecycle events belong to each scene.sys.events, not game.scene.on; inspect actual version APIs. Do not assume a native OscillatorNode has a state property; measure actual waveform output. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Call check for each observed assertion (up to 24 unique names). Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Correcting a script does not require a new stage. Screenshots, trace, exact test script and result are retained. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
 
     internal WorkExecutionOutcomeV1 WaitOutcome() => new(assignment.StageExecutionId,assignment.AttemptId,
         WorkExecutionDispositions.Completed,"awaiting-compute","Independent QA is executing or retaining its exact-build Chromium behavioral checks.",
@@ -60,7 +60,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         if(state is null || build is null || state.Identity!=journal.Identity || state.Commit!=source.Commit ||
             state.BuildSha256!=build.BuildSha256 || state.EnvironmentId!=build.EnvironmentId ||
             state.ScriptSha256!=Hash(Encoding.UTF8.GetBytes(state.Script)) || Encoding.UTF8.GetByteCount(state.Script)>12000 ||
-            state.Run is <1 or >4 || state.Step is <0 or >3 || state.EvidenceOffset is <0 or >4*1024*1024)
+            state.Run <1 || state.Step is <0 or >3 || state.EvidenceOffset is <0 or >4*1024*1024)
             throw new InvalidOperationException("Behavioral checks no longer bind the exact source, build, script and compute environment.");
     }
     private async Task SaveAsync(CancellationToken token)

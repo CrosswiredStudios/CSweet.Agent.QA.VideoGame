@@ -65,6 +65,8 @@ public sealed partial class SpecialistAgent
                 return AgentWorkResult.Success(await SaveStandaloneQaAsync(assignment, input, savedReport, stateKey, context, token));
             }
             var earlierEvidence = await journal.ReadEvidenceAsync(token);
+            var scripts = new GameQaBrowserScripts(assignment,prepared,journal,context);
+            await scripts.RestoreAsync(token);
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure an approved QA provider.");
             var model = Settings.GetString("llmModel");
             if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("Configure an approved QA model.");
@@ -78,7 +80,8 @@ public sealed partial class SpecialistAgent
                             if (browser.Pending || interactions.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
                             if ((browser.Failed || interactions.Failed) && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
                             await prepared.VerifyAsync(assignment, context, ct); await journal.SaveReportAsync(report, ct);
-                        }), journal, browser.Tool(), prepared.HistoryTool(assignment, context, journal), interactions.Tool()), token));
+                        }), journal, browser.Tool(reportBudget.PauseForCompute), prepared.HistoryTool(assignment, context, journal),
+                        interactions.Tool(reportBudget.PauseForCompute), scripts.Tool()), token));
             var session = await harness.CreateSessionAsync(token);
             // A retry must execute and write fresh evidence, never accept an old report left in the workspace.
             GameQaReport.Reset(path);
@@ -97,7 +100,7 @@ public sealed partial class SpecialistAgent
                     "rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands.", session,
                     options: null, cancellationToken: reportBudget.Token);
             }
-            catch (Exception error) when (reportBudget.IsReportCompletion(error,token))
+            catch (Exception error) when (reportBudget.IsReportCompletion(error,token) || reportBudget.IsComputeCompletion(error,token))
             {
                 // The durable validated report ends model work. Final prose is not a delivery gate;
                 // source integrity, current planning and artifact submission are checked below.
@@ -241,8 +244,9 @@ internal static partial class GameQaExecution
         without submitting a QA report or polling; the platform resumes the same source-bound test from compute events.
         Browser smoke evidence establishes startup and loading only; gameplay, input, FPS and real devices need their own checks.
         Use test_web_interactions for required Chromium behavior: actual Web Audio output/graph measurements, UI/scene transitions,
-        lifecycle hooks, viewport geometry and orientation rejection. Write independent untracked Playwright scripts using
-        execute_workspace_command, then submit their workspace-relative path. Scripts receive page, context, origin and
+        lifecycle hooks, viewport geometry and orientation rejection. Save independent untracked Playwright scripts using
+        save_browser_test_script, then submit the returned path. Source-bound drafts are restored after continuation;
+        do not rewrite them merely because the workspace path changed. Scripts receive page, context, origin and
         check(name, boolean, evidence). Instrument before navigation with page.addInitScript when needed; exercise the
         actual production application, not a reimplementation or mock. Keep each script within the tool's runtime budget.
         Cite named observed checks in each criterion. Do not mark runtime behavior satisfied using source inspection,
