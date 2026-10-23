@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.3.2`
+- Version: `5.3.3`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -241,3 +241,16 @@ counts. Large evidence is preserved rather than truncated into the control respo
 The exact preceding platform schema rejection can recover an unaccepted 32 KiB-output request
 using new operation terms and refreshed runner files. Accepted operations, unknown outcomes,
 unrelated failures and other stages never use this exception.
+
+## Complete compute-request acceptance (5.3.3)
+
+Compute idempotency keys hash the structured effect identity into a fixed 68-character value,
+separate from longer operating-state keys. Recovery of the exact preceding key-schema rejection
+uses new bounded terms only when no operation was accepted. Guest evidence reads use an absolute
+executable path.
+
+`BrowserRecoveryTests.Export_actual_behavior_requests_for_platform_schema_acceptance` exports the
+helper's complete prepare/run/evidence callbacks, including a near-limit script. Set
+`CSWEET_QA_REQUEST_EXPORT` to retain that NDJSON fixture. The platform's `ComputeSdkContractTests`
+checks the exported fixture against its actual MCP schema and guest validation, covering output,
+key, argument and executable constraints together.

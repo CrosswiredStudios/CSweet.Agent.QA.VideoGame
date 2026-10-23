@@ -7,6 +7,31 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 public sealed class InteractionTestingTests
 {
     [Fact]
+    public void Operation_keys_are_bounded_and_bind_every_logical_effect()
+    {
+        var scope="qa-checks:"+Guid.NewGuid().ToString("N")+":"+new string('a',64);
+        var key=GameQaInteractionTesting.OperationKey(scope,int.MaxValue,2,int.MaxValue,"schema repair with an arbitrary long prior key "+new string('b',160));
+        Assert.Equal(68,key.Length);Assert.StartsWith("qai:",key);
+        Assert.Equal(key,GameQaInteractionTesting.OperationKey(scope,int.MaxValue,2,int.MaxValue,"schema repair with an arbitrary long prior key "+new string('b',160)));
+        Assert.NotEqual(key,GameQaInteractionTesting.OperationKey(scope,int.MaxValue,1,int.MaxValue,"schema repair with an arbitrary long prior key "+new string('b',160)));
+    }
+    [Fact]
+    public void Key_schema_recovery_cannot_mutate_accepted_or_unproven_terms()
+    {
+        var stage=Guid.NewGuid();
+        const string message="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.idempotencyKey is too long.";
+        var outcome=new WorkExecutionOutcomeV1(stage,Guid.NewGuid(),WorkExecutionDispositions.Blocked,"blocked",message,
+            JsonSerializer.SerializeToElement(new{qaProcessingError=message}),[],[]);
+        var assignment=JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with{StageExecutionId=stage,PriorOutcomes=[outcome]};
+        var request=new GameQaInteractionTesting.Request(3,new('k',136),new ComputeCommand(Guid.NewGuid(),"/bin/sh","/var/lib/csweet-compute/work",[],30,8192));
+        var state=new GameQaInteractionTesting.State("identity",new('a',40),new('b',64),Guid.NewGuid(),new('c',64),"script",Request:request);
+        Assert.True(GameQaInteractionTesting.CanRecoverRejectedKey(state,assignment));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedKey(state with{OperationId=Guid.NewGuid()},assignment));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedKey(state with{Request=request with{Key="bounded"}},assignment));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedKey(state,assignment with{PriorOutcomes=[]}));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedKey(state,assignment with{StageExecutionId=Guid.NewGuid()}));
+    }
+    [Fact]
     public void Rejected_output_recovery_requires_exact_platform_proof_and_no_accepted_operation()
     {
         var stage=Guid.NewGuid();

@@ -11,6 +11,17 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 
 public sealed class BrowserRecoveryTests
 {
+    [Fact]
+    public async Task Export_actual_behavior_requests_for_platform_schema_acceptance()
+    {
+        var requested=Environment.GetEnvironmentVariable("CSWEET_QA_REQUEST_EXPORT");
+        var path=requested??Path.GetTempFileName();
+        try {
+            await File.WriteAllTextAsync(path,"");
+            await RunRecoveryAsync(false,"interaction-export",path);
+            Assert.Equal(3,File.ReadAllLines(path).Length);
+        }finally{if(requested is null)File.Delete(path);}
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -45,7 +56,7 @@ public sealed class BrowserRecoveryTests
     public Task Unknown_browser_execution_or_conflicting_upload_never_replays(string scenario) =>
         Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(true,scenario));
 
-    private async Task RunRecoveryAsync(bool lostBeforeAcceptance,string scenario)
+    private async Task RunRecoveryAsync(bool lostBeforeAcceptance,string scenario,string? export=null)
     {
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var states = new Dictionary<string, AgentOperatingStateResponse>();
@@ -61,6 +72,7 @@ public sealed class BrowserRecoveryTests
         var unknownUpload = false; byte[] remotePart = []; var probes=0; var repairs=0;
         var evidence = Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
         byte[] interactionEvidence=[];
+        var exported=new HashSet<string>();
         var runtime = new AgentTestRuntime()
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (read, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(read.StateKey))))
@@ -95,6 +107,8 @@ public sealed class BrowserRecoveryTests
                 var workload = request.GetProperty("workload");
                 var browser = workload.TryGetProperty("browserTest", out var specification);
                 var command = browser ? null : workload.GetProperty("command").Deserialize<ComputeCommand>(json)!;
+                if(export is not null && key.StartsWith("qai:",StringComparison.Ordinal) && command is not null && exported.Add(command.Executable))
+                    File.AppendAllText(export,request.GetRawText()+Environment.NewLine);
                 var behavior = command?.Executable == "/usr/bin/docker";
                 if ((interactions?behavior:browser) && lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission before acceptance"); }
                 var requestId = browser ? specification.GetProperty("requestId").GetGuid() : command!.RequestId;
@@ -129,7 +143,7 @@ public sealed class BrowserRecoveryTests
                     if(scenario=="interaction-wrong-script")receipt=receipt with{ScriptSha256=new('e',64)};
                     output=JsonSerializer.Serialize(receipt,json);
                 }
-                else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(key.StartsWith("qa-checks:",StringComparison.Ordinal)?interactionEvidence:evidence);
+                else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(key.StartsWith("qai:",StringComparison.Ordinal)?interactionEvidence:evidence);
                 else if(key.Contains(":verify-upload:",StringComparison.Ordinal))
                 {
                     probes++;
@@ -199,7 +213,8 @@ public sealed class BrowserRecoveryTests
             Assert.Equal(3, testing.ExecutionEvidence.Count);
             Assert.Contains("browser-artifact", await journal.ReadEvidenceAsync(default));
             if(interactions) {
-                await File.WriteAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"await page.goto(origin); check('audio', true, 'fixture browser measurement');");
+                await File.WriteAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"await page.goto(origin); check('audio', true, 'fixture browser measurement');"+
+                    (scenario=="interaction-export"?"\n// "+new string('x',11600):""));
                 var behavior=new GameQaInteractionTesting(assignment,source,journal,testing,context);
                 await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
                 for(var turn=0;turn<10 && behavior.Pending;turn++) {

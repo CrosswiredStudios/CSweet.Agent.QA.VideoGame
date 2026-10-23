@@ -35,7 +35,16 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             // The platform's exact previous failure proves admission rejected this
             // request before a compute effect. Never mutate/retry accepted terms.
             var command=PrepareCommand();
-            state=state with{Step=0,RunnerVersion="2",Request=new(state.Request!.Generation,state.Request.Key+":output-v2:prepare",command)};
+            state=state with{Step=0,RunnerVersion="2",Request=new(state.Request!.Generation,
+                OperationKey(key,state.Run,0,state.EvidenceOffset,"output-repair:"+state.Request.Command.RequestId.ToString("N")),command)};
+            await SaveAsync(token);
+        }
+        if(CanRecoverRejectedKey(state!,assignment)) {
+            await source.VerifyAsync(assignment,context,token);
+            await journal.RecordAsync("browser-check-rejected-request","Unaccepted request failed callback key schema; corrected request receives a bounded new identity",state!.Request,token);
+            var old=state.Request!;
+            state=state with{Request=new(old.Generation,OperationKey(key,state.Run,state.Step,state.EvidenceOffset,
+                "key-repair:"+old.Command.RequestId.ToString("N")),old.Command with{RequestId=Guid.NewGuid()})};
             await SaveAsync(token);
         }
         await AdvanceAsync(token);
@@ -150,10 +159,10 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         var command=state.Step switch {
             0=>PrepareCommand(),
             1=>RunCommand(),
-            2=>new ComputeCommand(Guid.NewGuid(),"python3","/var/lib/csweet-compute/work",["-c",
+            2=>new ComputeCommand(Guid.NewGuid(),"/usr/bin/python3","/var/lib/csweet-compute/work",["-c",
                 "import base64; f=open('"+ChecksRoot+"/evidence/evidence.zip','rb'); f.seek("+state.EvidenceOffset+"); print(base64.b64encode(f.read(4500)).decode())"],30,8192),
             _=>throw new InvalidOperationException("Unknown behavioral compute step.")};
-        var next=new Request(environment.Generation,$"{key}:{state.Run}:v2:step:{state.Step}:{state.EvidenceOffset}",command);
+        var next=new Request(environment.Generation,OperationKey(key,state.Run,state.Step,state.EvidenceOffset,"v2"),command);
         state=state with{Request=next};await SaveAsync(token);
         var submitted=await SubmitAsync(next,token);state=state with{OperationId=submitted.Id};await SaveAsync(token);
     }
@@ -196,6 +205,8 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         var bytes=await File.ReadAllBytesAsync(path,token);return new UTF8Encoding(false,true).GetString(bytes);
     }
     private static string Hash(byte[] bytes)=>Convert.ToHexStringLower(SHA256.HashData(bytes));
+    internal static string OperationKey(string scope,int run,int step,int offset,string purpose)=>
+        "qai:"+Hash(JsonSerializer.SerializeToUtf8Bytes(new{scope,run,step,offset,purpose},Json));
     internal static void ValidateReport(Report report,State expected,Guid requestId)
     {
         if(report.RequestId!=requestId||report.SourceCommitSha!=expected.Commit||report.BuildSha256!=expected.BuildSha256||
@@ -222,6 +233,14 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             prior is{Disposition:WorkExecutionDispositions.Blocked,OutcomeCode:"blocked"}&&prior.StageExecutionId==assignment.StageExecutionId&&
             prior.Output.ValueKind==JsonValueKind.Object&&prior.Output.TryGetProperty("qaProcessingError",out var error)&&
             error.ValueKind==JsonValueKind.String&&error.GetString()=="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.workload.command.maximumOutputBytes is above the maximum.";
+    }
+    internal static bool CanRecoverRejectedKey(State state,WorkExecutionAssignment assignment)
+    {
+        var prior=assignment.PriorOutcomes?.LastOrDefault();
+        return state.OperationId is null&&state.Request is{} request&&request.Key.Length>128&&
+            prior is{Disposition:WorkExecutionDispositions.Blocked,OutcomeCode:"blocked"}&&prior.StageExecutionId==assignment.StageExecutionId&&
+            prior.Output.ValueKind==JsonValueKind.Object&&prior.Output.TryGetProperty("qaProcessingError",out var error)&&error.ValueKind==JsonValueKind.String&&
+            error.GetString()=="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.idempotencyKey is too long.";
     }
     internal sealed record State(string Identity,string Commit,string BuildSha256,Guid EnvironmentId,string ScriptSha256,string Script,
         int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null);
