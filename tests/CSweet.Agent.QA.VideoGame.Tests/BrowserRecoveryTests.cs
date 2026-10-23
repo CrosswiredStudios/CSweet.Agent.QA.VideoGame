@@ -18,6 +18,16 @@ public sealed class BrowserRecoveryTests
         => RunRecoveryAsync(lostBeforeAcceptance,"none");
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Lost_behavioral_submission_reuses_exact_terms_and_retains_script_and_evidence(bool lostBeforeAcceptance)
+        => RunRecoveryAsync(lostBeforeAcceptance,"interaction");
+
+    [Fact]
+    public Task Unknown_behavioral_execution_is_not_replayed() =>
+        Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,"interaction-unknown"));
+
+    [Theory]
     [InlineData("uploaded")]
     [InlineData("missing")]
     public Task Unknown_upload_requires_exact_read_back_before_continuing(string scenario) => RunRecoveryAsync(true,scenario);
@@ -39,7 +49,8 @@ public sealed class BrowserRecoveryTests
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, null);
         var operations = new Dictionary<Guid, ComputeOperation>();
         var submissions = new Dictionary<string, (JsonElement Input, Guid Id)>();
-        var browserLaunches = 0; var lostReply = false;
+        var browserLaunches = 0; var interactionLaunches = 0; var lostReply = false;
+        var interactions = scenario.StartsWith("interaction",StringComparison.Ordinal);
         var unknownUpload = false; byte[] remotePart = []; var probes=0; var repairs=0;
         var evidence = Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
         var runtime = new AgentTestRuntime()
@@ -76,7 +87,8 @@ public sealed class BrowserRecoveryTests
                 var workload = request.GetProperty("workload");
                 var browser = workload.TryGetProperty("browserTest", out var specification);
                 var command = browser ? null : workload.GetProperty("command").Deserialize<ComputeCommand>(json)!;
-                if (browser && lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission before acceptance"); }
+                var behavior = command?.Executable == "/usr/bin/docker";
+                if ((interactions?behavior:browser) && lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission before acceptance"); }
                 var requestId = browser ? specification.GetProperty("requestId").GetGuid() : command!.RequestId;
                 string output = "";
                 if (browser) {
@@ -85,6 +97,16 @@ public sealed class BrowserRecoveryTests
                         specification.GetProperty("buildSha256").GetString()!, "Chromium fixture", true,
                         [new(375, 720, true, true, true, []), new(1280, 720, true, true, true, [])],
                         Convert.ToHexStringLower(SHA256.HashData(evidence)), evidence.Length), json);
+                }
+                else if(behavior) {
+                    interactionLaunches++;
+                    Assert.Contains("--network=none",command!.Arguments);Assert.Contains("--read-only",command.Arguments);
+                    Assert.Contains("--rm",command.Arguments);Assert.Contains("26s",command.Arguments);
+                    Assert.Contains("--cap-drop=ALL",command.Arguments);Assert.Contains("--security-opt=no-new-privileges",command.Arguments);
+                    var identity=JsonDocument.Parse(command.Arguments.Last()).RootElement;
+                    output=JsonSerializer.Serialize(new GameQaInteractionTesting.Report(requestId,commit,
+                        identity.GetProperty("buildSha256").GetString()!,identity.GetProperty("scriptSha256").GetString()!,"Chromium fixture",true,
+                        [new("audio","nonempty".Length>0,"Real fixture browser observation")],[],Convert.ToHexStringLower(SHA256.HashData(evidence)),evidence.Length),json);
                 }
                 else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(evidence);
                 else if(key.Contains(":verify-upload:",StringComparison.Ordinal))
@@ -114,9 +136,9 @@ public sealed class BrowserRecoveryTests
                 var operation = new ComputeOperation(Guid.NewGuid(), environmentId, environment.Generation, "Pending", null,
                     new(Command: new(requestId, 0, false, Encoding.UTF8.GetBytes(output), [])));
                 if ((unknownUpload && probes == 0 && !browser && command!.Arguments.Last().Contains("base64 -d",StringComparison.Ordinal)) ||
-                    browser && scenario == "browser") operation=operation with { Result=new(ErrorCode:"outcome-unknown") };
+                    browser && scenario == "browser" || behavior && scenario=="interaction-unknown") operation=operation with { Result=new(ErrorCode:"outcome-unknown") };
                 operations[operation.Id] = operation; submissions[key] = (request.Clone(), operation.Id);
-                if (browser && !lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission reply after acceptance"); }
+                if ((interactions?behavior:browser) && !lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission reply after acceptance"); }
                 return Task.FromResult(operation);
             });
         var context = runtime.CreateContext();
@@ -150,11 +172,32 @@ public sealed class BrowserRecoveryTests
             }
             Assert.False(testing.Pending);
             Assert.Equal(1, browserLaunches);
-            Assert.Equal(scenario == "none" ? 0 : 1,probes);
+            Assert.Equal(scenario == "none" || interactions ? 0 : 1,probes);
             Assert.Equal(scenario == "missing" ? 1 : 0,repairs);
             Assert.Contains("Observed browser compute evidence", testing.Evidence);
             Assert.Equal(3, testing.ExecutionEvidence.Count);
             Assert.Contains("browser-artifact", await journal.ReadEvidenceAsync(default));
+            if(interactions) {
+                await File.WriteAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"await page.goto(origin); check('audio', true, 'fixture browser measurement');");
+                var behavior=new GameQaInteractionTesting(assignment,source,journal,testing,context);
+                await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                for(var turn=0;turn<10 && behavior.Pending;turn++) {
+                    behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
+                    try{await behavior.ResumeAsync(default);}catch(IOException) when(lostReply){continue;}
+                }
+                Assert.False(behavior.Pending);Assert.False(behavior.Failed);Assert.Equal(1,interactionLaunches);
+                Assert.Contains("Observed independent Chromium behavior",behavior.Evidence);
+                Assert.Contains("browser-check-artifact",await journal.ReadEvidenceAsync(default));
+                await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// A separate focused check plan.");
+                await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                for(var turn=0;turn<10 && behavior.Pending;turn++) {
+                    behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
+                    await behavior.ResumeAsync(default);
+                }
+                Assert.False(behavior.Pending);Assert.Equal(2,interactionLaunches);
+                await File.AppendAllTextAsync(Path.Combine(source.Path,"src","game.js"),"changed");
+                await Assert.ThrowsAsync<InvalidOperationException>(()=>behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"}).AsTask());
+            }
             Assert.DoesNotContain(states.Values, state => state.Payload.TryGetProperty("Outcome", out _));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }

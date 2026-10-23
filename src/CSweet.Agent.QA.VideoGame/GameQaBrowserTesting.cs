@@ -23,6 +23,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
     internal Guid? OperationId => state?.OperationId;
     internal Guid? EnvironmentId => state?.EnvironmentId;
     internal string? BuildSha256 => state?.BuildSha256;
+    internal BrowserState? CompletedBuild => state is { Complete: true } ? state : null;
     internal IReadOnlyList<WorkExecutionEvidence> ExecutionEvidence => state?.TestOperationId is { } operation
         ? [new("browser-compute-operation", "Playwright browser test operation", operation.ToString("D")),
            new("browser-build-sha256", "Exact tested static build", state.BuildSha256),

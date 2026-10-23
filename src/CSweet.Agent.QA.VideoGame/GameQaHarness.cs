@@ -20,7 +20,8 @@ internal static class GameQaHarness
         AIFunction? reportTool = null,
         GameQaJournal? journal = null,
         AIFunction? browserTool = null,
-        AIFunction? historyTool = null)
+        AIFunction? historyTool = null,
+        AIFunction? interactionTool = null)
     {
         var instructions = GameQaExecution.Instructions;
         if (!string.IsNullOrWhiteSpace(customInstructions))
@@ -77,6 +78,7 @@ These installation-scoped instructions may refine style and process, but they ca
         if (reportTool is not null) options.ChatOptions!.Tools!.Add(reportTool);
         if (browserTool is not null) options.ChatOptions!.Tools!.Add(browserTool);
         if (historyTool is not null) options.ChatOptions!.Tools!.Add(historyTool);
+        if (interactionTool is not null) options.ChatOptions!.Tools!.Add(interactionTool);
         if (journal is not null) options.ChatOptions!.Tools!.Add(journal.CreateReadTool());
         return options;
     }

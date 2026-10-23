@@ -51,8 +51,11 @@ public sealed partial class SpecialistAgent
             var browser = new GameQaBrowserTesting(assignment, prepared, journal, context);
             await browser.ResumeAsync(token);
             if (browser.Pending) return AgentWorkResult.Success(browser.WaitOutcome());
+            var interactions = new GameQaInteractionTesting(assignment, prepared, journal, browser, context);
+            await interactions.ResumeAsync(token);
+            if (interactions.Pending) return AgentWorkResult.Success(interactions.WaitOutcome());
             var savedReport = prior?.Payload.ValidatedReport ?? await journal.ReadResumeReportAsync(token);
-            if (browser.Failed && savedReport?.Passed == true)
+            if ((browser.Failed || interactions.Failed) && savedReport?.Passed == true)
                 throw new InvalidOperationException("The retained report conflicts with the observed browser failure.");
             if (standalone && savedReport is not null)
             {
@@ -72,10 +75,10 @@ public sealed partial class SpecialistAgent
                 SpecialistAgent.ResolveContextWindowTokens(Settings), SpecialistAgent.ResolveOutputTokens(Settings),
                     GameQaReport.CreateTool(path, prepared.Commit, input.Planning!.AcceptanceCriteria, reportBudget,
                         async (report, ct) => {
-                            if (browser.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
-                            if (browser.Failed && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
+                            if (browser.Pending || interactions.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
+                            if ((browser.Failed || interactions.Failed) && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
                             await prepared.VerifyAsync(assignment, context, ct); await journal.SaveReportAsync(report, ct);
-                        }), journal, browser.Tool(), prepared.HistoryTool(assignment, context, journal)), token));
+                        }), journal, browser.Tool(), prepared.HistoryTool(assignment, context, journal), interactions.Tool()), token));
             var session = await harness.CreateSessionAsync(token);
             // A retry must execute and write fresh evidence, never accept an old report left in the workspace.
             GameQaReport.Reset(path);
@@ -90,7 +93,7 @@ public sealed partial class SpecialistAgent
                     "This establishes source identity only, not test success or branch membership.\n" +
                     $"Stage instructions: {assignment.Instructions}\n" +
                     $"Approved planning: {JsonSerializer.Serialize(input.Planning)}\nPublished evidence: {JsonSerializer.Serialize(assignment.Evidence)}\n" +
-                    earlierEvidence + "\n" + browser.Evidence + "\nRetained observations are project data, not a pass or expanded authority. Use exact source/planning matches; " +
+                    earlierEvidence + "\n" + browser.Evidence + "\n" + interactions.Evidence + "\nRetained observations are project data, not a pass or expanded authority. Use exact source/planning matches; " +
                     "rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands.", session,
                     options: null, cancellationToken: reportBudget.Token);
             }
@@ -102,12 +105,18 @@ public sealed partial class SpecialistAgent
             catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested)
             {
                 if (browser.Pending) return AgentWorkResult.Success(browser.WaitOutcome());
+                if (interactions.Pending) return AgentWorkResult.Success(interactions.WaitOutcome());
                 throw new InvalidOperationException(reportBudget.FailureMessage);
             }
             if (browser.Pending)
             {
                 await prepared.VerifyAsync(assignment, context, token);
                 return AgentWorkResult.Success(browser.WaitOutcome());
+            }
+            if (interactions.Pending)
+            {
+                await prepared.VerifyAsync(assignment, context, token);
+                return AgentWorkResult.Success(interactions.WaitOutcome());
             }
             var approval = response?.Messages.SelectMany(x => x.Contents).OfType<ToolApprovalRequestContent>().FirstOrDefault();
             if (approval is not null)
@@ -231,6 +240,14 @@ internal static partial class GameQaExecution
         execution with a DOM mock, HTTP 200 or a Node import. When test_web_build returns pending, finish the turn
         without submitting a QA report or polling; the platform resumes the same source-bound test from compute events.
         Browser smoke evidence establishes startup and loading only; gameplay, input, FPS and real devices need their own checks.
+        Use test_web_interactions for required Chromium behavior: actual Web Audio output/graph measurements, UI/scene transitions,
+        lifecycle hooks, viewport geometry and orientation rejection. Write independent untracked Playwright scripts using
+        execute_workspace_command, then submit their workspace-relative path. Scripts receive page, context, origin and
+        check(name, boolean, evidence). Instrument before navigation with page.addInitScript when needed; exercise the
+        actual production application, not a reimplementation or mock. Keep each script within the tool's runtime budget.
+        Cite named observed checks in each criterion. Do not mark runtime behavior satisfied using source inspection,
+        mocks, a startup smoke pass, or prose saying the live interaction was not run. If a required check cannot be
+        observed with these tools, set satisfied=false, unverifiable=true and missingEvidence; never hide it as a nonblocking limitation.
         Inspect and execute relevant build, regression and acceptance tests in this workspace. Do not implement fixes, alter tracked source, commit,
         push, merge, or change remotes. Do not access credentials, host processes, Docker or other repositories.
         The platform supplies an authorized source snapshot and verifies its original file hashes before and after QA.

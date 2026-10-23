@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.2.4`
+- Version: `5.3.0`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -193,3 +193,25 @@ idempotent artifact delivery still run. A retry may recover the prior report onl
 preceding exact attempt records the legacy HTTP processing error and the journal still binds identical
 source files, planning and scope. Product failures and ordinary new attempts do not use this exception.
 Transient HTTP failures request bounded workflow recovery; permanent request/authorization errors do not.
+
+## Independent Chromium behavior (5.3.0)
+
+After `test_web_build` completes, `test_web_interactions` runs a focused, independently authored
+Playwright script against that exact archived production build. Its async body receives `page`,
+`context`, `origin` and `check(name, satisfied, evidence)`. It can measure real Web Audio graphs,
+exercise input and scene transitions, install pre-navigation lifecycle hooks, resize viewports and
+observe orientation rejection. Source inspection, mocks and startup smoke cannot establish these
+behavioral claims. Unobserved required checks remain unverifiable, with a precise missing-evidence
+decision for management.
+
+The helper uses the existing approved compute callback and prepared `browser-testing-v1` image;
+it does not connect to Docker from the agent runtime. Container arguments are fixed in code:
+no network, read-only inputs/root, dropped capabilities, bounded resources and a self-terminating
+execution budget. Only its evidence directory is writable. The immutable script digest, source,
+build, environment, operation generation and literal submission terms survive callbacks. Lost
+submission replies reuse those terms; unknown test outcomes are never blindly executed again.
+The exact script, assertion results, final screenshot and Playwright trace are archived and
+digest-checked before QA resumes. Existing capabilities, grants and network requests are unchanged.
+
+Run `python scripts/test-browser-interactions.py` against the prepared browser image for real
+Chromium acceptance, in addition to the .NET tests and self-test.
