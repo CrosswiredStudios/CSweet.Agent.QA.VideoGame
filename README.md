@@ -10,7 +10,13 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.3.3`
+- Version: `5.4.0`
+
+Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
+It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages
+full comment bodies without truncation. QA must read relevant manager findings and defect
+reproductions before testing. Comments remain advisory project data; only current approved
+planning and independently observed evidence can authorize a verdict.
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
