@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.3.1`
+- Version: `5.3.2`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -230,3 +230,14 @@ response. It grants no verdict and still requires current source/operation autho
 Focused script corrections retain evidence and do not have an arbitrary four-script stage limit;
 existing journal, workload and workflow budgets still bound work. Identical retained tests are
 observed, not physically replayed.
+
+## Bounded behavior receipts (5.3.2)
+
+Behavior compute returns a compact control receipt within the approved 8 KiB output contract.
+The full assertion report is transferred inside the digest-verified evidence archive, then checked
+against the receipt's exact source/build/script/request identities, verdict and assertion/error
+counts. Large evidence is preserved rather than truncated into the control response.
+
+The exact preceding platform schema rejection can recover an unaccepted 32 KiB-output request
+using new operation terms and refreshed runner files. Accepted operations, unknown outcomes,
+unrelated failures and other stages never use this exception.

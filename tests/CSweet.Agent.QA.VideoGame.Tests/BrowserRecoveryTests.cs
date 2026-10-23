@@ -28,6 +28,13 @@ public sealed class BrowserRecoveryTests
         Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,"interaction-unknown"));
 
     [Theory]
+    [InlineData("interaction-mismatch")]
+    [InlineData("interaction-corrupt-evidence")]
+    [InlineData("interaction-wrong-script")]
+    public Task Behavioral_receipt_and_full_evidence_must_agree(string scenario)=>
+        Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,scenario));
+
+    [Theory]
     [InlineData("uploaded")]
     [InlineData("missing")]
     public Task Unknown_upload_requires_exact_read_back_before_continuing(string scenario) => RunRecoveryAsync(true,scenario);
@@ -53,6 +60,7 @@ public sealed class BrowserRecoveryTests
         var interactions = scenario.StartsWith("interaction",StringComparison.Ordinal);
         var unknownUpload = false; byte[] remotePart = []; var probes=0; var repairs=0;
         var evidence = Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
+        byte[] interactionEvidence=[];
         var runtime = new AgentTestRuntime()
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (read, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(read.StateKey))))
@@ -100,15 +108,28 @@ public sealed class BrowserRecoveryTests
                 }
                 else if(behavior) {
                     interactionLaunches++;
+                    Assert.Equal(8192,command!.MaximumOutputBytes);
                     Assert.Contains("--network=none",command!.Arguments);Assert.Contains("--read-only",command.Arguments);
                     Assert.Contains("--rm",command.Arguments);Assert.Contains("26s",command.Arguments);
                     Assert.Contains("--cap-drop=ALL",command.Arguments);Assert.Contains("--security-opt=no-new-privileges",command.Arguments);
                     var identity=JsonDocument.Parse(command.Arguments.Last()).RootElement;
-                    output=JsonSerializer.Serialize(new GameQaInteractionTesting.Report(requestId,commit,
+                    var fullReport=new GameQaInteractionTesting.Report(requestId,commit,
                         identity.GetProperty("buildSha256").GetString()!,identity.GetProperty("scriptSha256").GetString()!,"Chromium fixture",true,
-                        [new("audio","nonempty".Length>0,"Real fixture browser observation")],[],Convert.ToHexStringLower(SHA256.HashData(evidence)),evidence.Length),json);
+                        [new("audio",true,"Real fixture browser observation")],[],new('d',64),100);
+                    using(var buffer=new MemoryStream()) {
+                        using(var archive=new ZipArchive(buffer,ZipArchiveMode.Create,true)){
+                            using var writer=new StreamWriter(archive.CreateEntry("result.json").Open());writer.Write(JsonSerializer.Serialize(fullReport,json));
+                        }
+                        interactionEvidence=buffer.ToArray();
+                    }
+                    var receipt=new GameQaInteractionTesting.Receipt(requestId,commit,fullReport.BuildSha256,fullReport.ScriptSha256,
+                        fullReport.BrowserVersion,true,1,0,Convert.ToHexStringLower(SHA256.HashData(interactionEvidence)),interactionEvidence.Length);
+                    if(scenario=="interaction-mismatch")receipt=receipt with{CheckCount=2};
+                    if(scenario=="interaction-corrupt-evidence")receipt=receipt with{EvidenceSha256=new('e',64)};
+                    if(scenario=="interaction-wrong-script")receipt=receipt with{ScriptSha256=new('e',64)};
+                    output=JsonSerializer.Serialize(receipt,json);
                 }
-                else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(evidence);
+                else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(key.StartsWith("qa-checks:",StringComparison.Ordinal)?interactionEvidence:evidence);
                 else if(key.Contains(":verify-upload:",StringComparison.Ordinal))
                 {
                     probes++;

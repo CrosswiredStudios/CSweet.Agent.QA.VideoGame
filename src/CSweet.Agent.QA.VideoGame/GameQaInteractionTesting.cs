@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using CSweet.Agent.SDK;
@@ -28,6 +29,15 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         state = (await context.Platform.ReadOperatingStateAsync<State>(key,token))?.Payload;
         if(state is null)return;
         ValidateBinding();
+        if(CanRecoverRejectedOutput(state,assignment)) {
+            await source.VerifyAsync(assignment,context,token);
+            await journal.RecordAsync("browser-check-rejected-request","Unaccepted request failed callback output schema; corrected request receives a new identity",state.Request,token);
+            // The platform's exact previous failure proves admission rejected this
+            // request before a compute effect. Never mutate/retry accepted terms.
+            var command=PrepareCommand();
+            state=state with{Step=0,RunnerVersion="2",Request=new(state.Request!.Generation,state.Request.Key+":output-v2:prepare",command)};
+            await SaveAsync(token);
+        }
         await AdvanceAsync(token);
     }
     internal AIFunction Tool(Action? onPending=null) => AIFunctionFactory.Create(async (string testScriptPath,CancellationToken token) => {
@@ -37,7 +47,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         var hash = Hash(Encoding.UTF8.GetBytes(script));
         if(state is null || state.ScriptSha256!=hash) {
             if(state is {Complete:false})throw new InvalidOperationException("Resume the existing behavioral test before starting another.");
-            state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:(state?.Run??0)+1,Cursor:state?.Cursor??0);
+            state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:checked((state?.Run??0)+1),Cursor:state?.Cursor??0,RunnerVersion:"2");
             await SaveAsync(token);
             await journal.RecordAsync("browser-check-script",testScriptPath,new {state.ScriptSha256,script},token);
         }
@@ -93,13 +103,13 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             if(operation.Status!="Completed" || operation.Result is not {ErrorCode:null,Command:{ExitCode:0,TimedOut:false,Truncated:false,ErrorCode:null} output} || output.RequestId!=request.Command.RequestId)
                 throw new InvalidOperationException("Behavioral compute did not complete; no pass or blind test replay is permitted: "+(operation.Result?.ErrorCode??operation.FailureCode??"command failed"));
             if(state.Step==1) {
-                var report=JsonSerializer.Deserialize<Report>(output.StandardOutputText,Json)??throw new InvalidOperationException("Missing behavioral result.");
-                ValidateReport(report,state,request.Command.RequestId);
-                await journal.RecordAsync("browser-check-result","Independent exact-build Playwright assertions",new{operation.Id,report},token);
-                state=state with {Report=report};
+                var receipt=JsonSerializer.Deserialize<Receipt>(output.StandardOutputText,Json)??throw new InvalidOperationException("Missing behavioral receipt.");
+                ValidateReceipt(receipt,state,request.Command.RequestId);
+                await journal.RecordAsync("browser-check-receipt","Exact-build Playwright control receipt; full assertions pending evidence transfer",new{operation.Id,receipt},token);
+                state=state with {Manifest=receipt};
             } else if(state.Step==2) {
                 var bytes=Convert.FromBase64String(output.StandardOutputText.Trim());
-                if(bytes.Length!=Math.Min(4500,state.Report!.EvidenceBytes-state.EvidenceOffset))throw new InvalidOperationException("Behavioral evidence transfer was truncated.");
+                if(bytes.Length!=Math.Min(4500,state.Manifest!.EvidenceBytes-state.EvidenceOffset))throw new InvalidOperationException("Behavioral evidence transfer was truncated.");
                 var partKey=$"{key}:{state.Run}:e:{state.EvidenceOffset}";
                 await new RevisionSafeProjectState(context.Platform).MergeAsync<GameQaBrowserTesting.ArchivePart>(partKey,"video-game.qa-interaction-part.v1",1,
                     current=>current??new(Convert.ToBase64String(bytes)),new Dictionary<string,string>(),partKey,token);
@@ -109,17 +119,33 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             environment=await context.Platform.Compute.ReadAsync(state.EnvironmentId,token);
         }
         if(environment.State!="ready")return;
-        if(state.Step==2 && state.EvidenceOffset==state.Report!.EvidenceBytes) {
+        if(state.Step==1 && state.RunnerVersion!="2") {
+            // An older prepare may have completed just before the package update.
+            // Refresh only wrapper files before submitting any test, with new keys.
+            state=state with{Step=0,RunnerVersion="2"};await SaveAsync(token);
+        }
+        if(state.Step==2 && state.EvidenceOffset==state.Manifest!.EvidenceBytes) {
             using var evidence=new MemoryStream();
             for(var offset=0;offset<state.EvidenceOffset;offset+=4500){
                 var part=await context.Platform.ReadOperatingStateAsync<GameQaBrowserTesting.ArchivePart>($"{key}:{state.Run}:e:{offset}",token)
                     ??throw new InvalidOperationException("Behavioral evidence part is missing.");
                 evidence.Write(Convert.FromBase64String(part.Payload.Base64));
             }
-            if(Hash(evidence.ToArray())!=state.Report.EvidenceSha256)throw new InvalidOperationException("Behavioral evidence digest changed.");
+            if(Hash(evidence.ToArray())!=state.Manifest.EvidenceSha256)throw new InvalidOperationException("Behavioral evidence digest changed.");
+            evidence.Position=0;
+            using var zip=new ZipArchive(evidence,ZipArchiveMode.Read,leaveOpen:true);
+            var result=zip.Entries.SingleOrDefault(e=>e.FullName=="result.json")??throw new InvalidOperationException("Behavioral archive lacks one exact result.json.");
+            if(result.Length is <1 or >131072)throw new InvalidOperationException("Behavioral assertion report exceeds its verified bound.");
+            await using var resultStream=result.Open();
+            var report=await JsonSerializer.DeserializeAsync<Report>(resultStream,Json,token)??throw new InvalidOperationException("Missing full behavioral report.");
+            report=report with{EvidenceSha256=state.Manifest.EvidenceSha256,EvidenceBytes=state.Manifest.EvidenceBytes};
+            ValidateReport(report,state,state.Manifest.RequestId);
+            if(report.Passed!=state.Manifest.Passed||report.Checks.Count!=state.Manifest.CheckCount||report.Errors.Count!=state.Manifest.ErrorCount||
+                report.BrowserVersion!=state.Manifest.BrowserVersion)throw new InvalidOperationException("Full behavioral assertions differ from their compute receipt.");
+            await journal.RecordAsync("browser-check-result","Independent exact-build Playwright assertions",report,token);
             await journal.RecordAsync("browser-check-artifact","evidence.zip (base64; authored test, screenshot, trace, result)",
-                new{state.Report.EvidenceSha256,Base64=Convert.ToBase64String(evidence.ToArray())},token);
-            state=state with{Complete=true,Step=3};await SaveAsync(token);Pending=false;return;
+                new{state.Manifest.EvidenceSha256,Base64=Convert.ToBase64String(evidence.ToArray())},token);
+            state=state with{Report=report,Complete=true,Step=3};await SaveAsync(token);Pending=false;return;
         }
         var command=state.Step switch {
             0=>PrepareCommand(),
@@ -127,7 +153,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             2=>new ComputeCommand(Guid.NewGuid(),"python3","/var/lib/csweet-compute/work",["-c",
                 "import base64; f=open('"+ChecksRoot+"/evidence/evidence.zip','rb'); f.seek("+state.EvidenceOffset+"); print(base64.b64encode(f.read(4500)).decode())"],30,8192),
             _=>throw new InvalidOperationException("Unknown behavioral compute step.")};
-        var next=new Request(environment.Generation,$"{key}:{state.Run}:step:{state.Step}:{state.EvidenceOffset}",command);
+        var next=new Request(environment.Generation,$"{key}:{state.Run}:v2:step:{state.Step}:{state.EvidenceOffset}",command);
         state=state with{Request=next};await SaveAsync(token);
         var submitted=await SubmitAsync(next,token);state=state with{OperationId=submitted.Id};await SaveAsync(token);
     }
@@ -152,7 +178,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             "--mount","type=bind,src="+ChecksRoot+"/evidence,dst=/evidence","--entrypoint","timeout","csweet/browser-tests:1.64.0",
             "--signal=KILL","26s","python3","/checks/run.py",JsonSerializer.Serialize(new{requestId,sourceCommitSha=source.Commit,
                 buildSha256=state!.BuildSha256,scriptSha256=state.ScriptSha256},Json)};
-        return new(requestId,"/usr/bin/docker","/var/lib/csweet-compute/work",arguments,30,32768);
+        return new(requestId,"/usr/bin/docker","/var/lib/csweet-compute/work",arguments,30,8192);
     }
     internal static string Resource(string name)
     {
@@ -180,10 +206,29 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             report.EvidenceBytes is <1 or >4*1024*1024||report.EvidenceSha256 is not {Length:64}||report.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
             throw new InvalidOperationException("Behavioral results do not bind the exact source, build, script and executed assertions.");
     }
+    internal static void ValidateReceipt(Receipt receipt,State expected,Guid requestId)
+    {
+        if(receipt.RequestId!=requestId||receipt.SourceCommitSha!=expected.Commit||receipt.BuildSha256!=expected.BuildSha256||
+            receipt.ScriptSha256!=expected.ScriptSha256||string.IsNullOrWhiteSpace(receipt.BrowserVersion)||receipt.CheckCount is <0 or >24||
+            receipt.ErrorCount is <0 or >12||receipt.Passed&&(receipt.CheckCount==0||receipt.ErrorCount!=0)||
+            receipt.EvidenceBytes is <1 or >4*1024*1024||receipt.EvidenceSha256 is not{Length:64}||receipt.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
+            throw new InvalidOperationException("Behavioral receipt does not bind the exact source, build, script and evidence archive.");
+    }
+    internal static bool CanRecoverRejectedOutput(State state,WorkExecutionAssignment assignment)
+    {
+        var prior=assignment.PriorOutcomes?.LastOrDefault();
+        return state is{Step:1,OperationId:null,Request.Command.MaximumOutputBytes:32768}&&
+            state.Request.Command.Executable=="/usr/bin/docker"&&
+            prior is{Disposition:WorkExecutionDispositions.Blocked,OutcomeCode:"blocked"}&&prior.StageExecutionId==assignment.StageExecutionId&&
+            prior.Output.ValueKind==JsonValueKind.Object&&prior.Output.TryGetProperty("qaProcessingError",out var error)&&
+            error.ValueKind==JsonValueKind.String&&error.GetString()=="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.workload.command.maximumOutputBytes is above the maximum.";
+    }
     internal sealed record State(string Identity,string Commit,string BuildSha256,Guid EnvironmentId,string ScriptSha256,string Script,
-        int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false);
+        int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null);
     internal sealed record Request(long Generation,string Key,ComputeCommand Command);
     internal sealed record Report(Guid RequestId,string SourceCommitSha,string BuildSha256,string ScriptSha256,string BrowserVersion,bool Passed,
         IReadOnlyList<Check> Checks,IReadOnlyList<string> Errors,string EvidenceSha256,int EvidenceBytes);
     internal sealed record Check(string Name,bool Satisfied,string Evidence);
+    internal sealed record Receipt(Guid RequestId,string SourceCommitSha,string BuildSha256,string ScriptSha256,string BrowserVersion,bool Passed,
+        int CheckCount,int ErrorCount,string EvidenceSha256,int EvidenceBytes);
 }

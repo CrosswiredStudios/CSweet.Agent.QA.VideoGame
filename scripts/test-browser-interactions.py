@@ -65,6 +65,11 @@ for name, test, source, expected in cases:
         with zipfile.ZipFile(evidence / 'evidence.zip') as archive:
             assert {'test.cjs','final.png','trace.zip','result.json'} <= set(archive.namelist())
             assert archive.read('test.cjs') == test.encode('utf-8')
+            full_report = json.loads(archive.read('result.json'))
+            assert full_report['passed'] == report['passed']
+            assert len(full_report['checks']) == report['checkCount']
+            assert len(full_report['errors']) == report['errorCount']
+        assert len(process.stdout.encode('utf-8')) < 8192
         assert subprocess.run(['docker','inspect',container],capture_output=True).returncode != 0, 'Container retained'
         artifacts.joinpath(name+'.zip').write_bytes(payload)
         artifacts.joinpath(name+'.json').write_text(json.dumps(report,indent=2))

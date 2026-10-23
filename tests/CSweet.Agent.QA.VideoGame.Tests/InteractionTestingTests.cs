@@ -1,8 +1,29 @@
 using System.Text;
+using System.Text.Json;
+using CSweet.WorkManagement.Contracts;
+using CSweet.Agent.SDK.Compute;
 namespace CSweet.Agent.QA.VideoGame.Tests;
 
 public sealed class InteractionTestingTests
 {
+    [Fact]
+    public void Rejected_output_recovery_requires_exact_platform_proof_and_no_accepted_operation()
+    {
+        var stage=Guid.NewGuid();
+        const string message="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.workload.command.maximumOutputBytes is above the maximum.";
+        var outcome=new WorkExecutionOutcomeV1(stage,Guid.NewGuid(),WorkExecutionDispositions.Blocked,"blocked",message,
+            JsonSerializer.SerializeToElement(new{qaProcessingError=message}),[],[]);
+        var assignment=JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with{StageExecutionId=stage,PriorOutcomes=[outcome]};
+        var request=new GameQaInteractionTesting.Request(3,"old-unaccepted",new ComputeCommand(Guid.NewGuid(),"/usr/bin/docker","/var/lib/csweet-compute/work",[],30,32768));
+        var state=new GameQaInteractionTesting.State("identity",new('a',40),new('b',64),Guid.NewGuid(),new('c',64),"script",Step:1,Request:request);
+        Assert.True(GameQaInteractionTesting.CanRecoverRejectedOutput(state,assignment));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedOutput(state with{OperationId=Guid.NewGuid()},assignment));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedOutput(state with{Step=0},assignment));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedOutput(state,assignment with{StageExecutionId=Guid.NewGuid()}));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedOutput(state,assignment with{PriorOutcomes=[]}));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedOutput(state,assignment with{PriorOutcomes=[outcome with{Output=JsonSerializer.SerializeToElement(new{qaProcessingError="outcome-unknown"})}]}));
+        Assert.False(GameQaInteractionTesting.CanRecoverRejectedOutput(state,assignment with{PriorOutcomes=[outcome with{Output=JsonSerializer.SerializeToElement(new{qaProcessingError=42})}]}));
+    }
     [Fact]
     public void Observations_bind_source_build_script_request_and_nonempty_assertions()
     {

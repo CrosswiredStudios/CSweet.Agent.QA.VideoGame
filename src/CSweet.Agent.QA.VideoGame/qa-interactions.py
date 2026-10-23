@@ -29,4 +29,10 @@ if len(payload) > 4 * 1024 * 1024:
     raise ValueError('QA interaction evidence ZIP exceeds 4 MiB')
 report['evidenceSha256'] = hashlib.sha256(payload).hexdigest()
 report['evidenceBytes'] = len(payload)
-print(json.dumps(report, separators=(',', ':')))
+# The approved callback allows 8 KiB stdout. Full assertion evidence is in the
+# digest-identified ZIP, not squeezed or truncated into the control receipt.
+receipt = {key: report[key] for key in ('requestId', 'sourceCommitSha', 'buildSha256',
+           'scriptSha256', 'browserVersion', 'passed', 'evidenceSha256', 'evidenceBytes')}
+receipt['checkCount'] = len(report['checks'])
+receipt['errorCount'] = len(report['errors'])
+print(json.dumps(receipt, separators=(',', ':')))
