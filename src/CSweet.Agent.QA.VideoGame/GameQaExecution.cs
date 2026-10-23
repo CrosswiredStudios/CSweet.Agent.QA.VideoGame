@@ -276,7 +276,12 @@ internal static partial class GameQaExecution
         Submit the final report using submit_qa_report. Do not write the report through a shell command or generic
         file-write tool. Omit sourceCommitSha from the tool arguments; code supplies the exact assigned commit from the verified workspace.
         Do not retype hashes into evidence prose; refer to the assigned commit. The submission tool saves .csweet/qa-outcome.json with sourceCommitSha, summary, passed (boolean), validations (array of command,
-        succeeded, exitCode, diagnosticExcerpt), and findings (array). Report actual command output and reproducible
+        succeeded, exitCode, diagnosticExcerpt), and findings (array). Every validation MUST include a nonblank
+        diagnosticExcerpt copied from that command's observed output, including failed commands. Evidence in
+        summary or criteria does not replace this field. For example, after actually running npm list phaser,
+        retain its observed dependency tree in diagnosticExcerpt; do not submit only the command and exit code.
+        If a command is silent, execute an appropriate observable check or retain another relevant command's output;
+        never invent output or a placeholder to satisfy submission. Report actual command output and reproducible
         defects. Also include criteria (array of criterion, satisfied, evidence), covering each exact assigned acceptance
         criterion once with actual observed evidence. Assess required environments and delivery scope described in the
         ticket, but do not turn extra verification steps into additional formal criteria. findings is ONLY unresolved
@@ -308,6 +313,8 @@ internal static partial class GameQaExecution
         if (string.IsNullOrWhiteSpace(outcome.Summary)) issues.Add("summary must describe the observed QA result.");
         if (outcome.Validations is not { Count: > 0 } || outcome.Validations.Any(x => x is null || string.IsNullOrWhiteSpace(x.Command)))
             issues.Add("validations must contain executed commands with nonempty command fields.");
+        if (outcome.Validations?.Any(x => x is not null && string.IsNullOrWhiteSpace(x.DiagnosticExcerpt)) == true)
+            issues.Add("Every validation requires a nonblank diagnosticExcerpt from that command's actual observed output. Summary and criterion evidence do not replace command output. Preserve real failures; never invent output or placeholders.");
         if (outcome.Findings is null) issues.Add("findings must be an array of unresolved blockers, or [] when none remain.");
         if (outcome.Passed && outcome.Validations?.Any(x => x is not null && (!x.Succeeded || x.ExitCode != 0)) == true)
             issues.Add("passed=true conflicts with failed validation commands; report passed=false and preserve the failed results.");
