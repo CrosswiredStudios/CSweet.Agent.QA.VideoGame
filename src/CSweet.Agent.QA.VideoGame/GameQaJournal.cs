@@ -58,10 +58,22 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
         var index=await ReadIndexAsync(token);if(index?.ReportKey is not {} key)return null;
         var entry=await ReadEntryAsync(key,token);
         // Lost replies resume the same logical attempt. A manager-requested new attempt must reassess its current environment.
-        if(entry.AttemptId!=assignment.AttemptId)return null;
+        if(entry.AttemptId!=assignment.AttemptId && !TransportInterruptedReport(entry.AttemptId))return null;
         if(entry.Kind!="validated-report")throw new InvalidOperationException("The retained QA report has a different evidence kind.");
         return entry.Result.Deserialize<GameQaOutcome>(Json)??throw new InvalidOperationException("The retained QA report is malformed.");
     }
+    private bool TransportInterruptedReport(Guid reportAttempt)
+    {
+        // Only the immediately preceding platform-supplied outcome may explain this recovery.
+        // The journal identity independently binds source files, planning, scope and assignee revision.
+        var prior=assignment.PriorOutcomes?.LastOrDefault();
+        return prior is {Disposition:WorkExecutionDispositions.Blocked,OutcomeCode:"blocked"} &&
+            prior.StageExecutionId==assignment.StageExecutionId && prior.AttemptId==reportAttempt &&
+            prior.Output.ValueKind==JsonValueKind.Object && prior.Output.TryGetProperty("qaProcessingError",out var reason) &&
+            reason.ValueKind==JsonValueKind.String && reason.GetString()==
+                "QA could not complete exact-source validation (HttpRequestException); no validation verdict was accepted.";
+    }
+
     internal async Task<string> ReadEvidenceAsync(CancellationToken token)
     {
         var index=await ReadIndexAsync(token); if(index is null)return "No earlier command journal exists for this exact source and planning.";

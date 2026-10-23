@@ -26,11 +26,20 @@ internal static class GameQaReport
             "submit_qa_report",
             "Save the final independent QA report for the assigned commit. The verified workspace supplies sourceCommitSha in code; do not supply or retype it. Supply summary, passed, validations, findings and criteria directly as named arguments. Include ONLY the exact supplied acceptance criteria, once each, and actual command results. findings contains unresolved blockers only; passed=true REQUIRES findings=[]. Keep nonblocking observations and optional verification notes in summary. Never erase a real defect to pass: report passed=false instead. Set a required criterion's unverifiable=true (with satisfied=false) only when its evidence needs an unavailable environment; supply missingEvidence with the exact unavailable check/environment first, separately from passing evidence. Do not add extra criteria. This writes only the designated report, never source files."), commit, requiredCriteria, budget);
 
-    internal sealed class CorrectionBudget(CancellationToken token) : IDisposable
+    internal sealed class CorrectionBudget(CancellationToken token, bool stopAfterSavedReport = false) : IDisposable
     {
         private readonly CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(token);
         private int invalid;
         internal bool Exhausted { get; private set; }
+        internal GameQaOutcome? AcceptedReport { get; private set; }
+        internal void Accept(GameQaOutcome report)
+        {
+            if (!stopAfterSavedReport) return;
+            AcceptedReport ??= report;
+            stop.Cancel();
+        }
+        internal bool IsReportCompletion(Exception error,CancellationToken outer) => AcceptedReport is not null &&
+            !outer.IsCancellationRequested && error is OperationCanceledException or HttpRequestException;
         internal CancellationToken Token => stop.Token;
         internal string FailureMessage { get; private set; } = "";
         internal Submission? LastRejection { get; private set; }
@@ -84,6 +93,7 @@ internal static class GameQaReport
                 normalized.Remove("sourceCommitSha");
                 var result=await InnerFunction.InvokeAsync(normalized, cancellationToken);
                 saved=true;
+                budget?.Accept(report!);
                 return result;
             }
             catch (Exception error) when (error is JsonException or ArgumentException)
@@ -177,5 +187,16 @@ internal static class GameQaReport
                 throw new InvalidOperationException("QA report destination must not contain symbolic links.");
         }
         return path;
+    }
+}
+
+internal static partial class GameQaExecution
+{
+    internal static AgentWorkResult TransportFailure(HttpRequestException error)
+    {
+        var status=(int?)error.StatusCode;
+        var retryable=status is null or 408 or 429 || status>=500;
+        return AgentWorkResult.Failure("QA transport failed before delivery completed. Retained exact-source evidence is available for workflow recovery; no new verdict was granted.",
+            retryable ? "runtime.transport" : "agent.rejected",retryable);
     }
 }

@@ -58,6 +58,16 @@ public sealed class GameQaUnattendedTests
         Assert.Contains("12 actual checks passed",await next.ReadEvidenceAsync(default));Assert.Equal(report.SourceCommitSha,(await next.ReadReportAsync(default))!.SourceCommitSha);
         Assert.NotNull(await journal.ReadResumeReportAsync(default));
         Assert.Null(await next.ReadResumeReportAsync(default));
+        var interrupted=new WorkExecutionOutcomeV1(assignment.StageExecutionId,assignment.AttemptId,
+            WorkExecutionDispositions.Blocked,"blocked","Transport failed",JsonSerializer.SerializeToElement(new {
+                qaProcessingError="QA could not complete exact-source validation (HttpRequestException); no validation verdict was accepted."}),[],[]);
+        GameQaJournal Recovery(params WorkExecutionOutcomeV1[] outcomes)=>new(assignment with {AttemptId=Guid.NewGuid(),PriorOutcomes=outcomes},input,"exact-files",context.Platform);
+        Assert.NotNull(await Recovery(interrupted).ReadResumeReportAsync(default));
+        Assert.Null(await Recovery(interrupted with {AttemptId=Guid.NewGuid()}).ReadResumeReportAsync(default));
+        Assert.Null(await Recovery(interrupted with {StageExecutionId=Guid.NewGuid()}).ReadResumeReportAsync(default));
+        Assert.Null(await Recovery(interrupted,interrupted with {Output=JsonSerializer.SerializeToElement(new {qaProcessingError="Product defect"})}).ReadResumeReportAsync(default));
+        Assert.Null(await new GameQaJournal(assignment with {AttemptId=Guid.NewGuid(),PriorOutcomes=[interrupted]},input,"changed-source",context.Platform).ReadResumeReportAsync(default));
+
         Assert.Contains("Observed actual output",await next.ReadEvidenceAsync(default));
         var changedReport=report with {Passed=false,Summary="This retry found a missing browser check",Findings=["New observation"]};
         await next.SaveReportAsync(changedReport,default);

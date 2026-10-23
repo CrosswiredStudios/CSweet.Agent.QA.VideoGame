@@ -10,7 +10,7 @@ evidence remain mandatory; assignment recovery does not imply a passing verdict.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.2.3`
+- Version: `5.2.4`
 - Provides: `work.execution.run`
 - Activation: manual
 - Requested platform/provider capabilities: none
@@ -185,3 +185,11 @@ An unknown build-upload outcome triggers a read-only probe of that exact retaine
 allow continuation; a matching incomplete prefix can be completed by a guarded write of the same part.
 Conflicting bytes stop recovery. Two probe cycles bound this recovery. Browser tests and unrelated
 commands with unknown outcomes remain blocked for a decision and are never replayed by this path.
+
+## Terminal QA reports (5.2.4)
+
+A validated, durably checkpointed report ends model generation. Current source/planning checks and
+idempotent artifact delivery still run. A retry may recover the prior report only when its immediately
+preceding exact attempt records the legacy HTTP processing error and the journal still binds identical
+source files, planning and scope. Product failures and ordinary new attempts do not use this exception.
+Transient HTTP failures request bounded workflow recovery; permanent request/authorization errors do not.

@@ -67,7 +67,7 @@ public sealed partial class SpecialistAgent
             if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("Configure an approved QA model.");
             await using var shell = GameQaHarness.CreateShell(path);
             var client = context.CreateChatClient(new AgentLlmSelection(provider, model));
-            using var reportBudget = new GameQaReport.CorrectionBudget(token);
+            using var reportBudget = new GameQaReport.CorrectionBudget(token, stopAfterSavedReport: true);
             var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null,
                 SpecialistAgent.ResolveContextWindowTokens(Settings), SpecialistAgent.ResolveOutputTokens(Settings),
                     GameQaReport.CreateTool(path, prepared.Commit, input.Planning!.AcceptanceCriteria, reportBudget,
@@ -79,7 +79,7 @@ public sealed partial class SpecialistAgent
             var session = await harness.CreateSessionAsync(token);
             // A retry must execute and write fresh evidence, never accept an old report left in the workspace.
             GameQaReport.Reset(path);
-            AgentResponse response;
+            AgentResponse? response = null;
             try
             {
                 response = await harness.RunAsync($"Validate commit {prepared.Commit}.\n" +
@@ -94,6 +94,11 @@ public sealed partial class SpecialistAgent
                     "rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands.", session,
                     options: null, cancellationToken: reportBudget.Token);
             }
+            catch (Exception error) when (reportBudget.IsReportCompletion(error,token))
+            {
+                // The durable validated report ends model work. Final prose is not a delivery gate;
+                // source integrity, current planning and artifact submission are checked below.
+            }
             catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested)
             {
                 if (browser.Pending) return AgentWorkResult.Success(browser.WaitOutcome());
@@ -104,11 +109,11 @@ public sealed partial class SpecialistAgent
                 await prepared.VerifyAsync(assignment, context, token);
                 return AgentWorkResult.Success(browser.WaitOutcome());
             }
-            var approval = response.Messages.SelectMany(x => x.Contents).OfType<ToolApprovalRequestContent>().FirstOrDefault();
+            var approval = response?.Messages.SelectMany(x => x.Contents).OfType<ToolApprovalRequestContent>().FirstOrDefault();
             if (approval is not null)
                 throw new InvalidOperationException("C-Sweet QA encountered an unsupported interactive tool approval. " +
                     "Observed commands are preserved in journal " + journal.Key + ". No approval or QA verdict was granted; escalate the harness configuration to management.");
-            var outcome = await GameQaReport.ReadAsync(path, token, reportBudget.LastRejection);
+            var outcome = reportBudget.AcceptedReport ?? await GameQaReport.ReadAsync(path, token, reportBudget.LastRejection);
             var verdict = GameQaExecution.ValidateOutcome(outcome, prepared.Commit);
             GameQaExecution.ValidateCriterionCoverage(outcome!, input.Planning!.AcceptanceCriteria);
             await prepared.VerifyAsync(assignment, context, token);
@@ -139,6 +144,10 @@ public sealed partial class SpecialistAgent
             return AgentWorkResult.Success(completedOutcome);
         }
         catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException transport)
+        {
+            return GameQaExecution.TransportFailure(transport);
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             var reason = exception switch

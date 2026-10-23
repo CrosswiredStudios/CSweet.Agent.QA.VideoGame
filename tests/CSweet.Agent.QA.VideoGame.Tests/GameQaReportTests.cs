@@ -26,6 +26,47 @@ public sealed class GameQaReportTests : IDisposable
         if (length > 4096) Assert.Contains("full QA report", GameQaExecution.StatusSummary(saved.Summary));
     }
 
+    [Theory]
+    [InlineData(null,true)] [InlineData(408,true)] [InlineData(429,true)] [InlineData(500,true)]
+    [InlineData(400,false)] [InlineData(403,false)]
+    public void TransientHttpFailuresRequestBoundedTechnicalRecoveryWithoutCreatingAVerdict(int? status,bool retryable)
+    {
+        var failure=GameQaExecution.TransportFailure(new HttpRequestException("Provider body is not ticket feedback",null,(System.Net.HttpStatusCode?)status));
+        Assert.False(failure.Succeeded);Assert.Null(failure.Value);Assert.Equal(retryable,failure.Retryable);
+        Assert.Equal(retryable ? "runtime.transport" : "agent.rejected",failure.FailureCode);
+        Assert.DoesNotContain("Provider body",failure.Error);
+    }
+
+    [Fact]
+    public async Task DurableReportEndsActualHarnessBeforeAnotherModelRequest()
+    {
+        Directory.CreateDirectory(root);
+        using var budget=new GameQaReport.CorrectionBudget(default,stopAfterSavedReport:true);
+        await using var shell=GameQaHarness.CreateShell(root);
+        using var client=new ReportClient("flat");
+        var checkpointed=false;
+        var harness=client.AsHarnessAgent(GameQaHarness.CreateOptions("QA",root,shell,null,
+            reportTool:GameQaReport.CreateTool(root,Sha,["Record desktop fps"],budget,(_,_)=>{checkpointed=true;return Task.CompletedTask;})));
+        var session=await harness.CreateSessionAsync();
+        var error=await Record.ExceptionAsync(()=>harness.RunAsync("Submit report",session,cancellationToken:budget.Token));
+        Assert.True(checkpointed);Assert.NotNull(budget.AcceptedReport);Assert.False(budget.AcceptedReport.Passed);
+        Assert.False(budget.Exhausted);Assert.Equal(1,client.Calls);
+        if(error is not null) Assert.True(budget.IsReportCompletion(error,default));
+        Assert.True(budget.IsReportCompletion(new HttpRequestException("closing response failed"),default));
+        using var shutdown=new CancellationTokenSource();shutdown.Cancel();
+        Assert.False(budget.IsReportCompletion(new OperationCanceledException(),shutdown.Token));
+    }
+
+    [Fact]
+    public async Task FailedDurableCheckpointCannotEndModelPhaseOrAcceptReport()
+    {
+        using var budget=new GameQaReport.CorrectionBudget(default,stopAfterSavedReport:true);
+        var tool=GameQaReport.CreateTool(root,Sha,["Record desktop fps"],budget,(_,_)=>throw new HttpRequestException("checkpoint unavailable"));
+        await Assert.ThrowsAsync<HttpRequestException>(async()=>await tool.InvokeAsync(Flat(Report())));
+        Assert.Null(budget.AcceptedReport);Assert.False(budget.Token.IsCancellationRequested);
+        Assert.False(budget.IsReportCompletion(new HttpRequestException(),default));
+    }
+
     [Fact]
     public async Task PassingReportGetsCombinedActionableBlockerAndCoverageFeedback()
     {
