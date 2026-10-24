@@ -9,7 +9,7 @@ internal static class GameQaReport
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     internal static AIFunction CreateTool(string workspace, string commit, IReadOnlyList<string> requiredCriteria, CorrectionBudget? budget = null,
-        Func<GameQaOutcome, CancellationToken, Task>? checkpoint = null) =>
+        Func<GameQaOutcome, CancellationToken, Task>? checkpoint = null, Action<GameQaOutcome>? validateEvidence = null) =>
         new ReportFunction(AIFunctionFactory.Create(
             async (string summary, bool passed, IReadOnlyList<GitValidationResult> validations,
                 IReadOnlyList<string> findings, IReadOnlyList<GameQaCriterion> criteria, CancellationToken cancellationToken) =>
@@ -24,7 +24,7 @@ internal static class GameQaReport
                 return new Submission(true, "saved", "QA report saved. Source-integrity checks and delivery gates still apply.");
             },
             "submit_qa_report",
-            "Save the final independent QA report for the assigned commit. The verified workspace supplies sourceCommitSha in code; do not supply or retype it. Supply summary, passed, validations, findings and criteria directly as named arguments. Include ONLY the exact supplied acceptance criteria, once each, and actual command results. findings contains unresolved blockers only; passed=true REQUIRES findings=[]. Keep nonblocking observations and optional verification notes in summary. Never erase a real defect to pass: report passed=false instead. Set a required criterion's unverifiable=true (with satisfied=false) only when its evidence needs an unavailable environment; supply missingEvidence with the exact unavailable check/environment first, separately from passing evidence. Do not add extra criteria. This writes only the designated report, never source files."), commit, requiredCriteria, budget);
+            "Save the final independent QA report for the assigned commit. The verified workspace supplies sourceCommitSha in code; do not supply or retype it. Supply summary, passed, validations, findings and criteria directly as named arguments. Every validation requires command, succeeded, exitCode and a nonblank diagnosticExcerpt containing that command's actual observed output. Summary/criterion prose cannot replace diagnosticExcerpt. Never invent missing output. Include ONLY the exact supplied acceptance criteria, once each, and actual command results. findings contains unresolved blockers only; passed=true REQUIRES findings=[]. Keep nonblocking observations and optional verification notes in summary. Never erase a real defect to pass: report passed=false instead. Set a required criterion's unverifiable=true (with satisfied=false) only when its evidence needs an unavailable environment; supply missingEvidence with the exact unavailable check/environment first, separately from passing evidence. Do not add extra criteria. This writes only the designated report, never source files."), commit, requiredCriteria, budget, validateEvidence);
 
     internal sealed class CorrectionBudget(CancellationToken token, bool stopAfterSavedReport = false) : IDisposable
     {
@@ -72,7 +72,8 @@ internal static class GameQaReport
 
     internal sealed record Submission(bool Saved, string Code, string Message, IReadOnlyList<string>? RequiredCriteria = null);
 
-    private sealed class ReportFunction(AIFunction inner, string commit, IReadOnlyList<string> criteria, CorrectionBudget? budget) : DelegatingAIFunction(inner)
+    private sealed class ReportFunction(AIFunction inner, string commit, IReadOnlyList<string> criteria, CorrectionBudget? budget,
+        Action<GameQaOutcome>? validateEvidence) : DelegatingAIFunction(inner)
     {
         private readonly SemaphoreSlim gate = new(1,1);
         private bool saved;
@@ -95,6 +96,8 @@ internal static class GameQaReport
                 if (report is not null)
                 {
                     try { GameQaExecution.ValidateCriterionCoverage(report, criteria); }
+                    catch (InvalidOperationException error) { issues.Add(error.Message); }
+                    try { validateEvidence?.Invoke(report); }
                     catch (InvalidOperationException error) { issues.Add(error.Message); }
                 }
                 if (issues.Count != 0) throw new InvalidOperationException(string.Join("; ", issues));

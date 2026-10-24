@@ -7,10 +7,17 @@ original approved plan delegates only implementation. Standalone specialist QA
 still requires its planning delegation. Exact-source, eligibility and executed-test
 evidence remain mandatory; assignment recovery does not imply a passing verdict.
 
+`GameQaReport` rejects missing command output before saving a report or checkpoint.
+Each validation includes `diagnosticExcerpt` from its observed output; summary prose
+cannot replace it. Invalid submissions receive bounded correction feedback while real
+defects remain intact. `DeliveryScopeEvidence.Bind` also checks aggregate repository
+coverage before submission and supplies repository/commit bindings from the immutable
+candidate. The platform independently rechecks these gates before accepting QA.
+
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.4.0`
+- Version: `5.4.2`
 
 Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
 It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages
