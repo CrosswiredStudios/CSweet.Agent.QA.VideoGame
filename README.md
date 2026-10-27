@@ -272,4 +272,4 @@ Browser interaction tests support the local static server and `file:///tmp/build
 
 ## Evidence archive transfer
 
-Version 5.4.9 uses SDK 5.7.0 exports to retain browser evidence under one durable compute operation. Pending legacy chunk requests finish normally; retained source/build/script hashes remain pinned and completed tests are not replayed. QA reads the retained artifact within one callback, verifies its full digest and parses assertions before any verdict. Binary screenshots/traces stay with the artifact; the QA journal records its operation ID, digest and length.
+Version 5.4.9 uses SDK 5.7.1 exports to retain browser evidence under one durable compute operation. Pending legacy chunk requests finish normally; retained source/build/script hashes remain pinned and completed tests are not replayed. QA reads the retained artifact within one callback, verifies its full digest and parses assertions before any verdict. Binary screenshots/traces stay with the artifact; the QA journal records its operation ID, digest and length.
