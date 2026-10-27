@@ -17,7 +17,7 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.4.8`
+- Version: `5.4.9`
 
 Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
 It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages
@@ -269,3 +269,7 @@ checks the exported fixture against its actual MCP schema and guest validation, 
 key, argument and executable constraints together.
 
 Browser interaction tests support the local static server and `file:///tmp/build/<relative-output-file>` for the exact extracted build. Files outside that build and external origins remain denied; the browser container remains network-disabled. Compute callbacks continue the same source-bound evaluation, and completed checks retain their provenance.
+
+## Evidence archive transfer
+
+Version 5.4.9 uses SDK 5.7.1 exports to retain browser evidence under one durable compute operation. Pending legacy chunk requests finish normally; retained source/build/script hashes remain pinned and completed tests are not replayed. QA reads the retained artifact within one callback, verifies its full digest and parses assertions before any verdict. Binary screenshots/traces stay with the artifact; the QA journal records its operation ID, digest and length.

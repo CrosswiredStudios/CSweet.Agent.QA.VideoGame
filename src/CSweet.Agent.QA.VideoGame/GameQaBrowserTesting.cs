@@ -15,12 +15,13 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly string key = "qa-browser:" + journal.Identity;
+    private readonly GameQaEvidenceTransfer transfer = new(context, journal.Identity);
     private BrowserState? state;
     private int cursor;
     internal bool Pending { get; private set; }
     internal string Evidence { get; private set; } = "";
     internal bool Failed => state?.Report is { Passed: false };
-    internal Guid? OperationId => state?.OperationId;
+    internal Guid? OperationId => transfer.OperationId ?? state?.OperationId;
     internal Guid? EnvironmentId => state?.EnvironmentId;
     internal string? BuildSha256 => state?.BuildSha256;
     internal BrowserState? CompletedBuild => state is { Complete: true } ? state : null;
@@ -82,7 +83,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         return new(assignment.StageExecutionId, assignment.AttemptId,
         WorkExecutionDispositions.Completed, "awaiting-compute", "Independent QA is transferring or testing its exact web build in browser compute.",
         JsonSerializer.SerializeToElement(new { sourceCommitSha = source.Commit, buildSha256 = state!.BuildSha256,
-            environmentId = state.EnvironmentId, operationIds = state.OperationId is { } operation ? new[] { operation } : [],
+            environmentId = state.EnvironmentId, operationIds = OperationId is { } operation ? new[] { operation } : [],
             retryAt = DateTimeOffset.UtcNow.AddMinutes(5) }, Json), [], []);
     }
 
@@ -218,7 +219,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             await SaveAsync(token);
             current = await context.Platform.Compute.ReadAsync(current.Id, token);
         }
-        if (current.State != "ready") return;
+        if (current.State != "ready" && state.Report is null) return;
         var root = "/var/lib/csweet-compute/work/browser-" + state.BuildSha256;
         BrowserRequest next;
         if (state.Step == 0)
@@ -238,22 +239,12 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
                 browserTest = new { requestId, sourceCommitSha = state.Commit, buildSha256 = state.BuildSha256,
                     viewportWidths = state.Widths, requireWebGl = state.RequireWebGl } }, Json), state.UploadOffset);
         }
-        else if (state.EvidenceOffset < state.Report.EvidenceBytes)
-            next = Command("artifact", "python3 -c \"import base64; stream=open('" + root + "/evidence/evidence.zip','rb'); stream.seek(" +
-                state.EvidenceOffset + "); print(base64.b64encode(stream.read(4500)).decode())\"", state.UploadOffset);
         else
         {
-            using var evidence = new MemoryStream();
-            for (var offset = 0; offset < state.Report.EvidenceBytes; offset += 4500)
-            {
-                var part = await context.Platform.ReadOperatingStateAsync<ArchivePart>($"{key}:evidence:{offset}", token)
-                    ?? throw new InvalidOperationException("Browser evidence is missing.");
-                evidence.Write(Convert.FromBase64String(part.Payload.Base64));
-            }
-            if (Convert.ToHexStringLower(SHA256.HashData(evidence.ToArray())) != state.Report.EvidenceSha256)
-                throw new InvalidOperationException("Browser evidence digest changed during transfer.");
-            await journal.RecordAsync("browser-artifact", "evidence.zip (base64; screenshots, traces and result.json)",
-                new { state.Report.EvidenceSha256, Base64 = Convert.ToBase64String(evidence.ToArray()) }, token);
+            var evidence = await transfer.ReadAsync(current, new(state.Commit, state.BuildSha256, state.Report.EvidenceSha256, state.Report.EvidenceBytes), token);
+            if (evidence is null) return;
+            await journal.RecordAsync("browser-artifact", "evidence.zip (retained artifact; screenshots, traces and result.json)",
+                new { ArtifactId = transfer.OperationId, state.Report.EvidenceSha256, state.Report.EvidenceBytes }, token);
             state = state with { Complete = true }; await SaveAsync(token);
             await AdvanceAsync(token);
             return;

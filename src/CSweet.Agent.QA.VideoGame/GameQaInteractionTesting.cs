@@ -17,6 +17,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly string key = "qa-checks:" + assignment.StageExecutionId.ToString("N") + ":" + journal.Identity;
+    private readonly GameQaEvidenceTransfer transfer = new(context, journal.Identity);
     private State? state;
     internal bool Pending { get; private set; }
     internal bool Failed => state?.Report is { Passed: false };
@@ -71,7 +72,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
     internal WorkExecutionOutcomeV1 WaitOutcome() => new(assignment.StageExecutionId,assignment.AttemptId,
         WorkExecutionDispositions.Completed,"awaiting-compute","Independent QA is executing or retaining its exact-build Chromium behavioral checks.",
         JsonSerializer.SerializeToElement(new {sourceCommitSha=state!.Commit,buildSha256=state.BuildSha256,environmentId=state.EnvironmentId,
-            operationIds=state.OperationId is {} id?new[]{id}:[],retryAt=DateTimeOffset.UtcNow.AddMinutes(5)},Json),[],[]);
+            operationIds=(transfer.OperationId ?? state.OperationId) is {} id?new[]{id}:[],retryAt=DateTimeOffset.UtcNow.AddMinutes(5)},Json),[],[]);
 
     private void ValidateBinding()
     {
@@ -139,20 +140,17 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             state=state with{Step=state.Step==2?2:state.Step+1,Request=null,OperationId=null};await SaveAsync(token);
             environment=await context.Platform.Compute.ReadAsync(state.EnvironmentId,token);
         }
-        if(environment.State!="ready")return;
+        if(environment.State!="ready" && state.Step!=2)return;
         if(state.Step==1 && state.RunnerVersion!="3") {
             // An older prepare may have completed just before the package update.
             // Refresh only wrapper files before submitting any test, with new keys.
             state=state with{Step=0,RunnerVersion="3"};await SaveAsync(token);
         }
-        if(state.Step==2 && state.EvidenceOffset==state.Manifest!.EvidenceBytes) {
-            using var evidence=new MemoryStream();
-            for(var offset=0;offset<state.EvidenceOffset;offset+=4500){
-                var part=await context.Platform.ReadOperatingStateAsync<GameQaBrowserTesting.ArchivePart>($"{key}:{state.Run}:e:{offset}",token)
-                    ??throw new InvalidOperationException("Behavioral evidence part is missing.");
-                evidence.Write(Convert.FromBase64String(part.Payload.Base64));
-            }
-            if(Hash(evidence.ToArray())!=state.Manifest.EvidenceSha256)throw new InvalidOperationException("Behavioral evidence digest changed.");
+        if(state.Step==2) {
+            var bytes = await transfer.ReadAsync(environment, new(state.Commit, state.BuildSha256, state.Manifest!.EvidenceSha256,
+                state.Manifest.EvidenceBytes, state.ScriptSha256), token);
+            if (bytes is null) return;
+            using var evidence = new MemoryStream(bytes);
             evidence.Position=0;
             using var zip=new ZipArchive(evidence,ZipArchiveMode.Read,leaveOpen:true);
             var result=zip.Entries.SingleOrDefault(e=>e.FullName=="result.json")??throw new InvalidOperationException("Behavioral archive lacks one exact result.json.");
@@ -164,15 +162,13 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             if(report.Passed!=state.Manifest.Passed||report.Checks.Count!=state.Manifest.CheckCount||report.Errors.Count!=state.Manifest.ErrorCount||
                 report.BrowserVersion!=state.Manifest.BrowserVersion)throw new InvalidOperationException("Full behavioral assertions differ from their compute receipt.");
             await journal.RecordAsync("browser-check-result","Independent exact-build Playwright assertions",report,token);
-            await journal.RecordAsync("browser-check-artifact","evidence.zip (base64; authored test, screenshot, trace, result)",
-                new{state.Manifest.EvidenceSha256,Base64=Convert.ToBase64String(evidence.ToArray())},token);
+            await journal.RecordAsync("browser-check-artifact","evidence.zip (retained artifact; authored test, screenshot, trace, result)",
+                new{ArtifactId=transfer.OperationId,state.Manifest.EvidenceSha256,state.Manifest.EvidenceBytes},token);
             state=state with{Report=report,Complete=true,Step=3};await SaveAsync(token);Pending=false;return;
         }
         var command=state.Step switch {
             0=>PrepareCommand(),
             1=>RunCommand(),
-            2=>new ComputeCommand(Guid.NewGuid(),"/usr/bin/python3","/var/lib/csweet-compute/work",["-c",
-                "import base64; f=open('"+ChecksRoot+"/evidence/evidence.zip','rb'); f.seek("+state.EvidenceOffset+"); print(base64.b64encode(f.read(4500)).decode())"],30,8192),
             _=>throw new InvalidOperationException("Unknown behavioral compute step.")};
         var next=new Request(environment.Generation,OperationKey(key,state.Run,state.Step,state.EvidenceOffset,"v3"),command);
         state=state with{Request=next};await SaveAsync(token);
