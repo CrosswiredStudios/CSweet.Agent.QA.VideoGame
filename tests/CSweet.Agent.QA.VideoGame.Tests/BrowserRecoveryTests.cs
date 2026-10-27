@@ -34,6 +34,20 @@ public sealed class BrowserRecoveryTests
     public Task Lost_behavioral_submission_reuses_exact_terms_and_retains_script_and_evidence(bool lostBeforeAcceptance)
         => RunRecoveryAsync(lostBeforeAcceptance,"interaction");
 
+    [Theory]
+    [InlineData("evidence-read-unknown")]
+    [InlineData("interaction-evidence-read-unknown")]
+    [InlineData("evidence-read-unknown-reply")]
+    [InlineData("interaction-evidence-read-unknown-reply")]
+    public Task Lost_read_only_evidence_result_resumes_without_replaying_the_browser(string scenario) =>
+        RunRecoveryAsync(false,scenario);
+
+    [Theory]
+    [InlineData("evidence-read-unknown-limit")]
+    [InlineData("interaction-evidence-read-unknown-limit")]
+    public Task Repeated_unknown_evidence_reads_stop_at_the_recovery_budget(string scenario) =>
+        Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,scenario));
+
     [Fact]
     public Task Unknown_behavioral_execution_is_not_replayed() =>
         Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,"interaction-unknown"));
@@ -83,6 +97,7 @@ public sealed class BrowserRecoveryTests
         var evidence = Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
         byte[] interactionEvidence=[];
         var exported=new HashSet<string>();
+        var evidenceReads=0; var lostEvidenceReadReply=false;
         var runtime = new AgentTestRuntime()
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (read, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(read.StateKey))))
@@ -158,7 +173,10 @@ public sealed class BrowserRecoveryTests
                     if(scenario=="interaction-wrong-script")receipt=receipt with{ScriptSha256=new('e',64)};
                     output=JsonSerializer.Serialize(receipt,json);
                 }
-                else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) output = Convert.ToBase64String(key.StartsWith("qai:",StringComparison.Ordinal)?interactionEvidence:evidence);
+                else if (command!.Arguments.Last().Contains("evidence.zip", StringComparison.Ordinal)) {
+                    output = Convert.ToBase64String(key.StartsWith("qai:",StringComparison.Ordinal)?interactionEvidence:evidence);
+                    if(scenario.StartsWith("interaction",StringComparison.Ordinal)==key.StartsWith("qai:",StringComparison.Ordinal)) evidenceReads++;
+                }
                 else if(key.Contains(":verify-upload:",StringComparison.Ordinal))
                 {
                     probes++;
@@ -187,7 +205,15 @@ public sealed class BrowserRecoveryTests
                     new(Command: new(requestId, 0, false, Encoding.UTF8.GetBytes(output), [])));
                 if ((unknownUpload && probes == 0 && !browser && command!.Arguments.Last().Contains("base64 -d",StringComparison.Ordinal)) ||
                     browser && scenario == "browser" || behavior && scenario=="interaction-unknown") operation=operation with { Result=new(ErrorCode:"outcome-unknown") };
+                if(scenario.Contains("evidence-read-unknown",StringComparison.Ordinal) && command is not null && !browser && !behavior &&
+                    command.Arguments.Last().Contains("evidence.zip",StringComparison.Ordinal) &&
+                    scenario.StartsWith("interaction",StringComparison.Ordinal)==key.StartsWith("qai:",StringComparison.Ordinal) &&
+                    (evidenceReads==1 || scenario.EndsWith("-limit",StringComparison.Ordinal)))
+                    operation=operation with{Result=new(ErrorCode:"outcome-unknown")};
                 operations[operation.Id] = operation; submissions[key] = (request.Clone(), operation.Id);
+                if(scenario.EndsWith("-reply",StringComparison.Ordinal) && evidenceReads==2 && !lostEvidenceReadReply) {
+                    lostEvidenceReadReply=true; throw new IOException("Lost evidence recovery submission reply after acceptance");
+                }
                 if ((interactions?behavior:browser) && !lostBeforeAcceptance && !lostReply) { lostReply = true; throw new IOException("Fixture lost submission reply after acceptance"); }
                 return Task.FromResult(operation);
             });
@@ -236,7 +262,7 @@ public sealed class BrowserRecoveryTests
             }
             Assert.False(testing.Pending);
             Assert.Equal(1, browserLaunches);
-            Assert.Equal(scenario == "none" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) ? 0 : 1,probes);
+            Assert.Equal(scenario == "none" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) || scenario.StartsWith("evidence-read-",StringComparison.Ordinal) ? 0 : 1,probes);
             Assert.Equal(scenario == "missing" ? 1 : 0,repairs);
             Assert.Contains("Observed browser compute evidence", testing.Evidence);
             Assert.Equal(3, testing.ExecutionEvidence.Count);
@@ -275,9 +301,16 @@ public sealed class BrowserRecoveryTests
                 await File.AppendAllTextAsync(Path.Combine(source.Path,"src","game.js"),"changed");
                 await Assert.ThrowsAsync<InvalidOperationException>(()=>behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"}).AsTask());
             }
+            if(scenario.Contains("evidence-read-unknown",StringComparison.Ordinal)) Assert.True(evidenceReads>=2);
             Assert.DoesNotContain(states.Values, state => state.Payload.TryGetProperty("Outcome", out _));
         }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        finally {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            if(scenario.EndsWith("-limit",StringComparison.Ordinal)) {
+                Assert.Equal(3,evidenceReads); Assert.Equal(1,browserLaunches);
+                Assert.Equal(interactions?1:0,interactionLaunches);
+            }
+        }
 
         static byte[] SourceArchive()
         {

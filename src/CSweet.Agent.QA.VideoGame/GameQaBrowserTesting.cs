@@ -141,6 +141,23 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
                 current.Generation != operation.Generation)
                 throw new InvalidOperationException("Browser compute returned a different operation identity.");
             if (operation.Status is "Pending" or "Dispatching" or "Reconciling") return;
+            if (operation.Status == "Completed" && operation.Result?.ErrorCode == "outcome-unknown" && request.Kind == "artifact")
+            {
+                if (state.EvidenceReadRecoveries >= 2)
+                    throw new InvalidOperationException("Browser evidence read recovery exceeded its bounded budget.");
+                var identity = Guid.NewGuid();
+                var command = request.Workload.GetProperty("command").Deserialize<ComputeCommand>(Json)!
+                    with { RequestId = identity };
+                var replacement = request with { RequestId = identity, ExpectedGeneration = current.Generation,
+                    IdempotencyKey = $"{key}:evidence-recovery:{operation.Id:N}",
+                    Workload = JsonSerializer.SerializeToElement(new { command }, Json) };
+                state = state with { Pending = replacement, OperationId = null,
+                    EvidenceReadRecoveries = state.EvidenceReadRecoveries + 1 };
+                await SaveAsync(token);
+                var recoveredRead = await SubmitAsync(replacement, token);
+                state = state with { OperationId = recoveredRead.Id }; await SaveAsync(token);
+                return;
+            }
             if (operation.Status == "Completed" && operation.Result?.ErrorCode == "outcome-unknown" &&
                 request.Kind is "upload" or "repair-upload")
             {
@@ -194,7 +211,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
                 await new RevisionSafeProjectState(context.Platform).MergeAsync<ArchivePart>(partKey,
                     "video-game.qa-browser-evidence-part.v1", 1, _ => new(Convert.ToBase64String(bytes)),
                     new Dictionary<string, string>(), partKey, token);
-                state = state with { EvidenceOffset = state.EvidenceOffset + bytes.Length };
+                state = state with { EvidenceOffset = state.EvidenceOffset + bytes.Length, EvidenceReadRecoveries = 0 };
             }
             state = state with { Step = state.Step + 1, UploadOffset = request.NextOffset,
                 Pending = null, OperationId = null };
@@ -337,7 +354,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
     internal sealed record BrowserState(string Commit, string SourceIdentity, string BuildSha256, int BuildBytes,
         IReadOnlyList<int> Widths, bool RequireWebGl, Guid? EnvironmentId = null, int Step = 0, int UploadOffset = 0,
         BrowserRequest? Pending = null, Guid? OperationId = null, BrowserReport? Report = null, int EvidenceOffset = 0, bool Complete = false,
-        Guid? TestOperationId = null, int Cursor = 0, int UploadRecoveries = 0);
+        Guid? TestOperationId = null, int Cursor = 0, int UploadRecoveries = 0, int EvidenceReadRecoveries = 0);
     internal sealed record BrowserRequest(Guid RequestId, string Kind, long ExpectedGeneration, string IdempotencyKey, JsonElement Workload, int NextOffset);
     internal sealed record BrowserReport(Guid RequestId, string SourceCommitSha, string BuildSha256, string BrowserVersion,
         bool Passed, IReadOnlyList<ViewportResult> Viewports, string EvidenceSha256, int EvidenceBytes);
