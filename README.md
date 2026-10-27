@@ -17,7 +17,7 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.4.5`
+- Version: `5.4.6`
 
 Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
 It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages
@@ -267,3 +267,5 @@ helper's complete prepare/run/evidence callbacks, including a near-limit script.
 `CSWEET_QA_REQUEST_EXPORT` to retain that NDJSON fixture. The platform's `ComputeSdkContractTests`
 checks the exported fixture against its actual MCP schema and guest validation, covering output,
 key, argument and executable constraints together.
+
+Browser interaction tests support the local static server and `file:///tmp/build/<relative-output-file>` for the exact extracted build. Files outside that build and external origins remain denied; the browser container remains network-disabled. Compute callbacks continue the same source-bound evaluation, and completed checks retain their provenance.

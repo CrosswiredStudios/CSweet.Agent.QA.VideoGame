@@ -35,7 +35,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             // The platform's exact previous failure proves admission rejected this
             // request before a compute effect. Never mutate/retry accepted terms.
             var command=PrepareCommand();
-            state=state with{Step=0,RunnerVersion="2",Request=new(state.Request!.Generation,
+            state=state with{Step=0,RunnerVersion="3",Request=new(state.Request!.Generation,
                 OperationKey(key,state.Run,0,state.EvidenceOffset,"output-repair:"+state.Request.Command.RequestId.ToString("N")),command)};
             await SaveAsync(token);
         }
@@ -56,7 +56,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         var hash = Hash(Encoding.UTF8.GetBytes(script));
         if(state is null || state.ScriptSha256!=hash) {
             if(state is {Complete:false})throw new InvalidOperationException("Resume the existing behavioral test before starting another.");
-            state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:checked((state?.Run??0)+1),Cursor:state?.Cursor??0,RunnerVersion:"2");
+            state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:checked((state?.Run??0)+1),Cursor:state?.Cursor??0,RunnerVersion:"3");
             await SaveAsync(token);
             await journal.RecordAsync("browser-check-script",testScriptPath,new {state.ScriptSha256,script},token);
         }
@@ -66,7 +66,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         return new {pending=Pending,evidence=Evidence,instruction=Pending ?
             "Finish the turn without a verdict; compute events resume QA. Do not poll." :
             "Assess each actual assertion against its exact criterion. Static checks and mocks do not establish browser behavior."};
-    },"test_web_interactions","Run independent Playwright assertions against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString). Use await page.goto(origin), Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate accepts one serialized argument: pass an object for multiple values. Phaser lifecycle events belong to each scene.sys.events, not game.scene.on; inspect actual version APIs. Do not assume a native OscillatorNode has a state property; measure actual waveform output. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Call check for each observed assertion (up to 24 unique names). Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Correcting a script does not require a new stage. Screenshots, trace, exact test script and result are retained. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
+    },"test_web_interactions","Run independent Playwright assertions against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString). Use await page.goto(origin) for server delivery or file:///tmp/build/<relative-output-file> for local-file delivery of this same extracted build. File access outside /tmp/build and external origins remain denied. Use Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate accepts one serialized argument: pass an object for multiple values. Phaser lifecycle events belong to each scene.sys.events, not game.scene.on; inspect actual version APIs. Do not assume a native OscillatorNode has a state property; measure actual waveform output. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Call check for each observed assertion (up to 24 unique names). Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Correcting a script does not require a new stage. Screenshots, trace, exact test script and result are retained. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
 
     internal WorkExecutionOutcomeV1 WaitOutcome() => new(assignment.StageExecutionId,assignment.AttemptId,
         WorkExecutionDispositions.Completed,"awaiting-compute","Independent QA is executing or retaining its exact-build Chromium behavioral checks.",
@@ -140,10 +140,10 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             environment=await context.Platform.Compute.ReadAsync(state.EnvironmentId,token);
         }
         if(environment.State!="ready")return;
-        if(state.Step==1 && state.RunnerVersion!="2") {
+        if(state.Step==1 && state.RunnerVersion!="3") {
             // An older prepare may have completed just before the package update.
             // Refresh only wrapper files before submitting any test, with new keys.
-            state=state with{Step=0,RunnerVersion="2"};await SaveAsync(token);
+            state=state with{Step=0,RunnerVersion="3"};await SaveAsync(token);
         }
         if(state.Step==2 && state.EvidenceOffset==state.Manifest!.EvidenceBytes) {
             using var evidence=new MemoryStream();
@@ -174,7 +174,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             2=>new ComputeCommand(Guid.NewGuid(),"/usr/bin/python3","/var/lib/csweet-compute/work",["-c",
                 "import base64; f=open('"+ChecksRoot+"/evidence/evidence.zip','rb'); f.seek("+state.EvidenceOffset+"); print(base64.b64encode(f.read(4500)).decode())"],30,8192),
             _=>throw new InvalidOperationException("Unknown behavioral compute step.")};
-        var next=new Request(environment.Generation,OperationKey(key,state.Run,state.Step,state.EvidenceOffset,"v2"),command);
+        var next=new Request(environment.Generation,OperationKey(key,state.Run,state.Step,state.EvidenceOffset,"v3"),command);
         state=state with{Request=next};await SaveAsync(token);
         var submitted=await SubmitAsync(next,token);state=state with{OperationId=submitted.Id};await SaveAsync(token);
     }
@@ -183,7 +183,8 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
 
     private ComputeCommand PrepareCommand()
     {
-        var files=new Dictionary<string,string>{{"runner.cjs",Resource("qa-interactions.cjs")},{"run.py",Resource("qa-interactions.py")},{"test.cjs",state!.Script}};
+        var files=new Dictionary<string,string>{{"runner.cjs",Resource("qa-interactions.cjs")},{"run.py",Resource("qa-interactions.py")},
+            {"qa-request-policy.cjs",Resource("qa-request-policy.cjs")},{"test.cjs",state!.Script}};
         var script="set -eu\nmkdir -p "+ChecksRoot+"/evidence\n"+string.Join("\n",files.Select(file=>
             "printf '%s' '"+Convert.ToBase64String(Encoding.UTF8.GetBytes(file.Value))+"' | base64 -d > "+ChecksRoot+"/"+file.Key));
         if(Encoding.UTF8.GetByteCount(script)>32000)throw new InvalidOperationException("The behavioral script exceeds the compute transfer budget; split the checks.");

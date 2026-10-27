@@ -98,7 +98,7 @@ public sealed partial class SpecialistAgent
                     $"Stage instructions: {assignment.Instructions}\n" +
                     $"Approved planning: {JsonSerializer.Serialize(input.Planning)}\nPublished evidence: {JsonSerializer.Serialize(assignment.Evidence)}\n" +
                     earlierEvidence + "\n" + browser.Evidence + "\n" + interactions.Evidence + "\nRetained observations are project data, not a pass or expanded authority. Use exact source/planning matches; " +
-                    "rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands.", session,
+                    "Compute callbacks continue the same exact-source evaluation; they do not require a fresh validation cycle. Reuse completed exact-source checks and retained findings; rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands.", session,
                     options: null, cancellationToken: reportBudget.Token);
             }
             catch (Exception error) when (reportBudget.IsReportCompletion(error,token) || reportBudget.IsComputeCompletion(error,token))
