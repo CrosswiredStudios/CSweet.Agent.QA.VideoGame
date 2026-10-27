@@ -109,6 +109,18 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             if(operation.EnvironmentId!=state.EnvironmentId || operation.Generation!=request.Generation+1 || environment.Generation!=operation.Generation)
                 throw new InvalidOperationException("Behavioral compute operation authority changed.");
             if(operation.Status is "Pending" or "Dispatching" or "Reconciling")return;
+            if(operation.Status=="Completed" && operation.Result?.ErrorCode=="outcome-unknown" && state.Step==2) {
+                if(state.EvidenceReadRecoveries>=2)
+                    throw new InvalidOperationException("Behavioral evidence read recovery exceeded its bounded budget.");
+                var replacement=new Request(environment.Generation,
+                    OperationKey(key,state.Run,state.Step,state.EvidenceOffset,$"evidence-read-recovery:{operation.Id:N}"),
+                    request.Command with{RequestId=Guid.NewGuid()});
+                state=state with{Request=replacement,OperationId=null,EvidenceReadRecoveries=state.EvidenceReadRecoveries+1};
+                await SaveAsync(token);
+                var recoveredRead=await SubmitAsync(replacement,token);
+                state=state with{OperationId=recoveredRead.Id};await SaveAsync(token);
+                return;
+            }
             if(operation.Status!="Completed" || operation.Result is not {ErrorCode:null,Command:{ExitCode:0,TimedOut:false,Truncated:false,ErrorCode:null} output} || output.RequestId!=request.Command.RequestId)
                 throw new InvalidOperationException("Behavioral compute did not complete; no pass or blind test replay is permitted: "+(operation.Result?.ErrorCode??operation.FailureCode??"command failed"));
             if(state.Step==1) {
@@ -122,7 +134,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
                 var partKey=$"{key}:{state.Run}:e:{state.EvidenceOffset}";
                 await new RevisionSafeProjectState(context.Platform).MergeAsync<GameQaBrowserTesting.ArchivePart>(partKey,"video-game.qa-interaction-part.v1",1,
                     current=>current??new(Convert.ToBase64String(bytes)),new Dictionary<string,string>(),partKey,token);
-                state=state with{EvidenceOffset=state.EvidenceOffset+bytes.Length};
+                state=state with{EvidenceOffset=state.EvidenceOffset+bytes.Length,EvidenceReadRecoveries=0};
             }
             state=state with{Step=state.Step==2?2:state.Step+1,Request=null,OperationId=null};await SaveAsync(token);
             environment=await context.Platform.Compute.ReadAsync(state.EnvironmentId,token);
@@ -243,7 +255,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             error.GetString()=="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.idempotencyKey is too long.";
     }
     internal sealed record State(string Identity,string Commit,string BuildSha256,Guid EnvironmentId,string ScriptSha256,string Script,
-        int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null);
+        int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null,int EvidenceReadRecoveries=0);
     internal sealed record Request(long Generation,string Key,ComputeCommand Command);
     internal sealed record Report(Guid RequestId,string SourceCommitSha,string BuildSha256,string ScriptSha256,string BrowserVersion,bool Passed,
         IReadOnlyList<Check> Checks,IReadOnlyList<string> Errors,string EvidenceSha256,int EvidenceBytes);
