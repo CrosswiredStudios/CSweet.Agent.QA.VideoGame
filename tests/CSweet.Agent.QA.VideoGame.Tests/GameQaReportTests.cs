@@ -7,6 +7,28 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 
 public sealed class GameQaReportTests : IDisposable
 {
+    [Theory]
+    [InlineData(true, null)]
+    [InlineData(true, "")]
+    [InlineData(false, "  ")]
+    public async Task Missing_command_output_is_corrected_before_any_verdict_is_saved(bool passed, string? output)
+    {
+        using var budget = new GameQaReport.CorrectionBudget(default);
+        var checkpoints = 0;
+        var tool = GameQaReport.CreateTool(root, Sha, ["Record desktop fps"], budget,
+            (_, _) => { checkpoints++; return Task.CompletedTask; });
+        var invalid = Report(passed) with { Validations = [new("npm list phaser", true, 0, output)] };
+        var feedback = Assert.IsType<GameQaReport.Submission>(await tool.InvokeAsync(Flat(invalid)));
+        Assert.False(feedback.Saved);
+        Assert.Contains("diagnosticExcerpt", feedback.Message);
+        Assert.Contains("never invent", feedback.Message);
+        Assert.Equal(0, checkpoints);
+        Assert.False(File.Exists(Path.Combine(root, ".csweet", "qa-outcome.json")));
+        await tool.InvokeAsync(Flat(invalid with { Validations = [new("npm list phaser", true, 0, "phaser@4.2.1")] }));
+        Assert.Equal(1, checkpoints);
+        Assert.Equal("phaser@4.2.1", Assert.Single((await GameQaReport.ReadAsync(root, default)).Validations).DiagnosticExcerpt);
+    }
+
     private readonly string root = Path.Combine(Path.GetTempPath(), "qa-report-" + Guid.NewGuid().ToString("N"));
     private static readonly string Sha = new('a', 40);
     private static GameQaOutcome Report(bool passed = false) => new(Sha, "Static checks pass; desktop measurement is unavailable", passed,
@@ -130,6 +152,7 @@ public sealed class GameQaReportTests : IDisposable
     [InlineData("flat")]
     [InlineData("repair")]
     [InlineData("assigned-source")]
+    [InlineData("output-repair")]
     public async Task ReportSubmissionWorksThroughTheActualHarness(string format)
     {
         Directory.CreateDirectory(root);
@@ -163,12 +186,20 @@ public sealed class GameQaReportTests : IDisposable
                 yield return new(ChatRole.Assistant,[new FunctionCallContent("compute-"+calls,"start_pending_compute",new Dictionary<string,object?>())]);
                 yield break;
             }
-            if (format == "exhaust" || calls == 1 || format == "repair" && calls == 2)
+            if (format == "exhaust" || calls == 1 || format is "repair" or "output-repair" && calls == 2)
             {
                 var arguments = WireArguments("flat");
                 if (format == "assigned-source") arguments.Remove("sourceCommitSha");
                 if (format == "exhaust") arguments["passed"] = true;
                 if (format == "repair" && calls == 1) arguments["criteria"] = JsonSerializer.SerializeToElement(Array.Empty<object>());
+                if (format == "output-repair" && calls == 1)
+                    arguments["validations"] = JsonSerializer.SerializeToElement(new[] { new { command = "npm list phaser", succeeded = true, exitCode = 0 } });
+                if (format == "output-repair" && calls == 2)
+                {
+                    var feedback = messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>().Last();
+                    Assert.Contains("diagnosticExcerpt", JsonSerializer.Serialize(feedback.Result));
+                    Assert.Contains("never invent", JsonSerializer.Serialize(feedback.Result));
+                }
                 if (format == "repair" && calls == 2)
                 {
                     var feedback = messages.SelectMany(x => x.Contents).OfType<FunctionResultContent>().Last();

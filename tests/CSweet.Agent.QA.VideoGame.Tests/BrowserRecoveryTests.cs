@@ -56,6 +56,15 @@ public sealed class BrowserRecoveryTests
     public Task Unknown_browser_execution_or_conflicting_upload_never_replays(string scenario) =>
         Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(true,scenario));
 
+    [Theory]
+    [InlineData("unready-pending")]
+    [InlineData("unready-failed")]
+    [InlineData("unready-feature")]
+    [InlineData("unready-provision")]
+    [InlineData("unready-empty-identity")]
+    public Task Preparation_failures_never_claim_queued_compute_and_recover_after_readiness(string scenario)
+        => RunRecoveryAsync(false, scenario);
+
     private async Task RunRecoveryAsync(bool lostBeforeAcceptance,string scenario,string? export=null)
     {
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -63,6 +72,7 @@ public sealed class BrowserRecoveryTests
         var workspaceId = Guid.NewGuid(); var itemId = Guid.NewGuid(); var environmentId = Guid.NewGuid();
         var commit = new string('a', 40); var project = Guid.NewGuid(); var repositoryId = Guid.NewGuid();
         var wrongHistory = false;
+        var preparationReady = !scenario.StartsWith("unready-", StringComparison.Ordinal);
         var environment = new ComputeEnvironment(environmentId, 1, 1, "running", "ready", "ephemeral",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, null);
         var operations = new Dictionary<Guid, ComputeOperation>();
@@ -92,9 +102,14 @@ public sealed class BrowserRecoveryTests
                     History = read.IncludeHistory ? new(repositoryId, wrongHistory ? new string('c', 40) : commit, commit,
                         new('b', 40), "work/assigned", "main", new('b', 40), true,
                         [new(commit, [new string('b', 40)], "feat(task): source fixture", false)], null) : null }))
-            .RegisterCapability<ProvisionComputeRequest, ComputeEnvironment>(ComputeCapabilities.Provision, (_, _) => Task.FromResult(environment))
+            .RegisterCapability<ProvisionComputeRequest, ComputeEnvironment>(ComputeCapabilities.Provision, (_, _) => {
+                if (!preparationReady && scenario == "unready-provision") throw new UnauthorizedAccessException("Compute admission denied.");
+                return Task.FromResult(!preparationReady && scenario == "unready-empty-identity" ? environment with { Id = Guid.Empty } : environment);
+            })
             .RegisterCapability<JsonElement, JsonElement>(ComputeCapabilities.Read, (request, cancellation) => {
-                object result = request.TryGetProperty("defaults", out _) ? new ComputeDefaults("Ready", project, "browser-fixture", null) { Features = ["browser-testing-v1"] } :
+                object result = request.TryGetProperty("defaults", out _) ? new ComputeDefaults(!preparationReady && scenario == "unready-pending" ? "Pending" :
+                    !preparationReady && scenario == "unready-failed" ? "Failed" : "Ready", project, "browser-fixture", null)
+                    { Features = !preparationReady && scenario == "unready-feature" ? [] : ["browser-testing-v1"] } :
                     request.TryGetProperty("operationId", out var identity) ? operations[identity.GetGuid()] with { Status = "Completed" } : environment;
                 return Task.FromResult(JsonSerializer.SerializeToElement(result, json));
             })
@@ -197,6 +212,20 @@ public sealed class BrowserRecoveryTests
             wrongHistory = false;
             await Assert.ThrowsAnyAsync<Exception>(async () => await historyTool.InvokeAsync(new AIFunctionArguments { ["offset"] = -1, ["limit"] = 20 }));
             var testing = new GameQaBrowserTesting(assignment, source, journal, context);
+            Assert.Throws<InvalidOperationException>(() => testing.WaitOutcome());
+            if (!preparationReady)
+            {
+                await Assert.ThrowsAnyAsync<Exception>(async () => await testing.Tool().InvokeAsync(
+                    new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true }));
+                Assert.False(testing.Pending);
+                Assert.Throws<InvalidOperationException>(() => testing.WaitOutcome());
+                Assert.Empty(submissions);
+                Assert.Equal(0, browserLaunches);
+                preparationReady = true;
+                testing = new GameQaBrowserTesting(assignment with { AttemptId = Guid.NewGuid() }, source, journal, context);
+                await testing.ResumeAsync(default);
+            }
+            else
             await testing.Tool().InvokeAsync(new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true });
             Assert.True(testing.Pending);
             Assert.Equal("awaiting-compute", testing.WaitOutcome().OutcomeCode);
@@ -207,7 +236,7 @@ public sealed class BrowserRecoveryTests
             }
             Assert.False(testing.Pending);
             Assert.Equal(1, browserLaunches);
-            Assert.Equal(scenario == "none" || interactions ? 0 : 1,probes);
+            Assert.Equal(scenario == "none" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) ? 0 : 1,probes);
             Assert.Equal(scenario == "missing" ? 1 : 0,repairs);
             Assert.Contains("Observed browser compute evidence", testing.Evidence);
             Assert.Equal(3, testing.ExecutionEvidence.Count);
