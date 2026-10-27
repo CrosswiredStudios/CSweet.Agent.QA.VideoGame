@@ -18,14 +18,7 @@ jobs:
           dotnet-version: 10.0.x
       - name: Verify bundled extension provenance
         shell: pwsh
-        run: |
-          $root = 'extensions/video-game'
-          $manifest = Get-Content "$root/extension.json" -Raw | ConvertFrom-Json
-          foreach ($file in $manifest.files.PSObject.Properties) {
-            if ((Get-FileHash "$root/$($file.Name)" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.Value) {
-              throw "Extension hash mismatch: $($file.Name)"
-            }
-          }
+        run: ./scripts/verify-extension.ps1
       - name: Test using only public package dependencies
         shell: pwsh
         run: |
