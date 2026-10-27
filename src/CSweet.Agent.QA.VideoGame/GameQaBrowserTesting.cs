@@ -75,11 +75,16 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             instruction = Pending ? "Compute is running. Finish this turn; the platform resumes QA automatically. Do not poll or claim a browser pass." : "Assess the observed browser results against the exact acceptance criteria." };
     }, "test_web_build", "Test the actual static web build from this assigned source in isolated compute with Playwright and Chromium. First build the project, then supply its workspace-relative output directory (for example dist), viewportWidths (normally [375,1280]) and requireWebGl. Source and build hashes are bound by code. Returns pending while transferring/testing; finish the turn without a verdict and QA resumes automatically. Screenshots and traces are retained in the QA evidence journal. This smoke test does not establish gameplay, FPS or device compatibility.");
 
-    internal WorkExecutionOutcomeV1 WaitOutcome() => new(assignment.StageExecutionId, assignment.AttemptId,
+    internal WorkExecutionOutcomeV1 WaitOutcome()
+    {
+        if (!Pending || state?.EnvironmentId is not { } environment || environment == Guid.Empty)
+            throw new InvalidOperationException("No admitted browser compute environment is pending. Resolve compute preparation before retrying QA.");
+        return new(assignment.StageExecutionId, assignment.AttemptId,
         WorkExecutionDispositions.Completed, "awaiting-compute", "Independent QA is transferring or testing its exact web build in browser compute.",
         JsonSerializer.SerializeToElement(new { sourceCommitSha = source.Commit, buildSha256 = state!.BuildSha256,
             environmentId = state.EnvironmentId, operationIds = state.OperationId is { } operation ? new[] { operation } : [],
             retryAt = DateTimeOffset.UtcNow.AddMinutes(5) }, Json), [], []);
+    }
 
     private async Task SaveAsync(CancellationToken token)
     {
@@ -94,7 +99,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
 
     private async Task AdvanceAsync(CancellationToken token)
     {
-        Pending = true;
+        Pending = false;
         if (state!.Complete)
         {
             Evidence = "Observed browser compute evidence for this exact source and build:\n" + JsonSerializer.Serialize(state.Report, Json)
@@ -105,18 +110,22 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         var options = await context.Platform.Compute.GetProjectDefaultsAsync(assignment.WorkstreamId, token);
         if (options is not { State: "Ready", TemplateId: { } template } || options.WorkstreamId != assignment.WorkstreamId ||
             !options.Features.Contains("browser-testing-v1"))
-            throw new InvalidOperationException("Browser testing requires the browser-testing-v1 compute image and approved project compute grants. Upgrade compute preparation before retrying QA.");
+            throw new InvalidOperationException($"Browser compute preparation is not ready ({options?.State ?? "unavailable"}; {options?.ErrorCode ?? "browser-testing-v1 unavailable"}). Complete Linux preparation on the project's Compute page before retrying QA. No browser test was queued.");
         if (state.EnvironmentId is null)
         {
             var desired = "qa-browser:" + assignment.WorkstreamId.ToString("N");
             var environment = await context.Platform.Compute.ProvisionAsync(new(assignment.WorkstreamId, desired, desired,
                 new("linux", "x64", template, new(2, 2048, 20480), options.MaximumLifetimeSeconds)), token);
+            if (environment.Id == Guid.Empty) throw new InvalidOperationException("Browser compute admission returned no environment identity.");
             state = state with { EnvironmentId = environment.Id };
             await SaveAsync(token);
         }
         var current = await context.Platform.Compute.ReadAsync(state.EnvironmentId.Value, token);
         if (current.DesiredState != "running" || current.State is "failed" or "destroyed" or "stopped")
             throw new InvalidOperationException("QA browser compute needs recovery: " + (current.FailureCode ?? current.State));
+        // A retained build alone is not queued compute. Only wait after the platform
+        // has admitted an environment and its current identity has been checked.
+        Pending = true;
         if (state.Pending is { } request)
         {
             var operation = state.OperationId is { } operationId
