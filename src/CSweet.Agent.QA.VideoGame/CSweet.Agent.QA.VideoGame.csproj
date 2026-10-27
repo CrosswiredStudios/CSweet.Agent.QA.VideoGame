@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>5.4.8</Version>
+    <Version>5.4.9</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CSweet.Agent.SDK" Version="5.5.4" />
+    <PackageReference Include="CSweet.Agent.SDK" Version="5.7.0" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI.Harness" Version="1.15.0" />

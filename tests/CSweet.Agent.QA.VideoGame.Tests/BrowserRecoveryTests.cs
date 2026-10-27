@@ -22,6 +22,9 @@ public sealed class BrowserRecoveryTests
             Assert.Equal(3,File.ReadAllLines(path).Length);
         }finally{if(requested is null)File.Delete(path);}
     }
+    [Fact]
+    public Task Pending_legacy_chunk_survives_upgrade_and_exports_remaining_evidence_without_replaying_test() => RunRecoveryAsync(false,"legacy-partial");
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -90,11 +93,13 @@ public sealed class BrowserRecoveryTests
         var environment = new ComputeEnvironment(environmentId, 1, 1, "running", "ready", "ephemeral",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, null);
         var operations = new Dictionary<Guid, ComputeOperation>();
+        var artifacts = new Dictionary<Guid, byte[]>();
         var submissions = new Dictionary<string, (JsonElement Input, Guid Id)>();
         var browserLaunches = 0; var interactionLaunches = 0; var lostReply = false;
         var interactions = scenario.StartsWith("interaction",StringComparison.Ordinal);
         var unknownUpload = false; byte[] remotePart = []; var probes=0; var repairs=0;
-        var evidence = Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
+        var evidence = scenario=="legacy-partial" ? new byte[500000] : Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
+        var legacyInjected=false;
         byte[] interactionEvidence=[];
         var exported=new HashSet<string>();
         var evidenceReads=0; var lostEvidenceReadReply=false;
@@ -122,6 +127,11 @@ public sealed class BrowserRecoveryTests
                 return Task.FromResult(!preparationReady && scenario == "unready-empty-identity" ? environment with { Id = Guid.Empty } : environment);
             })
             .RegisterCapability<JsonElement, JsonElement>(ComputeCapabilities.Read, (request, cancellation) => {
+                if(request.TryGetProperty("artifactId",out var artifactId)) {
+                    var artifact=operations[artifactId.GetGuid()].Result!.Artifact!;var bytes=artifacts[artifactId.GetGuid()];var offset=request.GetProperty("offset").GetInt32();
+                    return Task.FromResult(JsonSerializer.SerializeToElement(new ComputeEvidencePage(artifactId.GetGuid(),artifact.Sha256,artifact.Length,offset,
+                        bytes.AsSpan(offset,Math.Min(65536,bytes.Length-offset)).ToArray()),json));
+                }
                 object result = request.TryGetProperty("defaults", out _) ? new ComputeDefaults(!preparationReady && scenario == "unready-pending" ? "Pending" :
                     !preparationReady && scenario == "unready-failed" ? "Failed" : "Ready", project, "browser-fixture", null)
                     { Features = !preparationReady && scenario == "unready-feature" ? [] : ["browser-testing-v1"] } :
@@ -135,6 +145,37 @@ public sealed class BrowserRecoveryTests
                     return Task.FromResult(operations[retained.Id]);
                 }
                 var workload = request.GetProperty("workload");
+                if(workload.TryGetProperty("evidenceArchive",out var exportRequest)) {
+                    var archive=exportRequest.Deserialize<ComputeEvidenceArchive>(json)!;
+                    if(scenario=="legacy-partial" && !legacyInjected) {
+                        legacyInjected=true;lostReply=true;
+                        var row=states.Single(x=>x.Key.StartsWith("qa-browser:",StringComparison.Ordinal));
+                        var browserState=row.Value.Payload.Deserialize<GameQaBrowserTesting.BrowserState>(json)!;
+                        var oldGeneration=environment.Generation;environment=environment with{Generation=oldGeneration+1};
+                        var oldCommand=new ComputeCommand(Guid.NewGuid(),"/usr/bin/python3","/var/lib/csweet-compute/work",["-c","read retained evidence.zip"],30,8192);
+                        var oldOperation=new ComputeOperation(Guid.NewGuid(),environmentId,environment.Generation,"Completed",null,
+                            new(Command:new(oldCommand.RequestId,0,false,Encoding.UTF8.GetBytes(Convert.ToBase64String(evidence[..4500])),[])));
+                        operations[oldOperation.Id]=oldOperation;
+                        browserState=browserState with{Pending=new(oldCommand.RequestId,"artifact",oldGeneration,"retained-legacy-read",
+                            JsonSerializer.SerializeToElement(new{command=oldCommand},json),browserState.UploadOffset),OperationId=oldOperation.Id};
+                        states[row.Key]=row.Value with{Payload=JsonSerializer.SerializeToElement(browserState,json)};
+                        foreach(var unsubmitted in states.Keys.Where(x=>x.StartsWith("qa-archive:",StringComparison.Ordinal)).ToArray())states.Remove(unsubmitted);
+                        throw new IOException("Fixture resumes a retained pre-upgrade evidence chunk");
+                    }
+                    var isBehavior=archive.ScriptSha256 is not null;var bytes=isBehavior?interactionEvidence:evidence;
+                    if(scenario.StartsWith("interaction",StringComparison.Ordinal)==isBehavior)evidenceReads++;
+                    environment=environment with{Generation=environment.Generation+1};
+                    var archived=new ComputeOperation(Guid.NewGuid(),environmentId,environment.Generation,"Pending",null,
+                        new(Artifact:new(archive.SourceCommitSha,archive.BuildSha256,archive.Sha256,archive.Length,archive.ScriptSha256)));
+                    if(scenario.Contains("evidence-read-unknown",StringComparison.Ordinal) && scenario.StartsWith("interaction",StringComparison.Ordinal)==isBehavior &&
+                        (evidenceReads==1 || scenario.EndsWith("-limit",StringComparison.Ordinal))) archived=archived with{Result=new(ErrorCode:"outcome-unknown")};
+                    operations[archived.Id]=archived;artifacts[archived.Id]=bytes;submissions[key]=(request.Clone(),archived.Id);
+                    if(export is not null && isBehavior && exported.Add("archive"))File.AppendAllText(export,request.GetRawText()+Environment.NewLine);
+                    if(scenario.EndsWith("-reply",StringComparison.Ordinal) && evidenceReads==2 && !lostEvidenceReadReply) {
+                        lostEvidenceReadReply=true;throw new IOException("Lost export reply after acceptance");
+                    }
+                    return Task.FromResult(archived);
+                }
                 var browser = workload.TryGetProperty("browserTest", out var specification);
                 var command = browser ? null : workload.GetProperty("command").Deserialize<ComputeCommand>(json)!;
                 if(export is not null && key.StartsWith("qai:",StringComparison.Ordinal) && command is not null && exported.Add(command.Executable))
@@ -262,7 +303,7 @@ public sealed class BrowserRecoveryTests
             }
             Assert.False(testing.Pending);
             Assert.Equal(1, browserLaunches);
-            Assert.Equal(scenario == "none" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) || scenario.StartsWith("evidence-read-",StringComparison.Ordinal) ? 0 : 1,probes);
+            Assert.Equal(scenario == "none" || scenario == "legacy-partial" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) || scenario.StartsWith("evidence-read-",StringComparison.Ordinal) ? 0 : 1,probes);
             Assert.Equal(scenario == "missing" ? 1 : 0,repairs);
             Assert.Contains("Observed browser compute evidence", testing.Evidence);
             Assert.Equal(3, testing.ExecutionEvidence.Count);
