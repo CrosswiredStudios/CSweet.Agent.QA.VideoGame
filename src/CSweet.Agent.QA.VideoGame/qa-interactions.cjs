@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const { chromium } = require('/opt/browser/node_modules/playwright');
 const { serverFor } = require('/opt/browser/runner.cjs');
+const { allowedRequest } = require('./qa-request-policy.cjs');
 
 // This runner and the independently authored test execute only inside the isolated,
 // network-disabled browser container. Neither receives host credentials or paths.
@@ -22,7 +23,7 @@ async function run(request) {
     report.browserVersion = browser.version();
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, serviceWorkers: 'block' });
     await context.route('**/*', route => {
-      if (new URL(route.request().url()).origin === origin) return route.continue();
+      if (allowedRequest(route.request().url(), origin)) return route.continue();
       recordError('External request blocked: ' + route.request().url());
       return route.abort('blockedbyclient');
     });

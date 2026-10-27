@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>5.4.5</Version>
+    <Version>5.4.6</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
@@ -20,5 +20,6 @@
     <Compile Include="../../extensions/video-game/*.cs" Link="Extension/%(Filename)%(Extension)" />
     <EmbeddedResource Include="qa-interactions.cjs" />
     <EmbeddedResource Include="qa-interactions.py" />
+    <EmbeddedResource Include="qa-request-policy.cjs" />
   </ItemGroup>
 </Project>
