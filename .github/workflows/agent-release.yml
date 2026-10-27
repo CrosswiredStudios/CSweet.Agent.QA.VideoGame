@@ -60,6 +60,9 @@ jobs:
           $projectVersion = [string]($project.Project.PropertyGroup | Where-Object Version | Select-Object -First 1).Version
           if ($projectVersion -ne $version) { throw "csproj version $projectVersion does not match manifest version $version." }
           if (-not (Test-Path "releases/$version.md")) { throw "Missing releases/$version.md for version $version." }
+      - name: Verify bundled extension provenance
+        shell: pwsh
+        run: ./scripts/verify-extension.ps1
       - run: dotnet test CSweet.Agent.QA.VideoGame.slnx -c Release
       - name: Publish linux-x64 agent
         run: dotnet publish src/CSweet.Agent.QA.VideoGame/CSweet.Agent.QA.VideoGame.csproj -c Release --framework net10.0 --runtime linux-x64 --self-contained false -o publish/linux-x64

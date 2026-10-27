@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Extension provenance hashes identify these exact bytes on every checkout.
+extensions/video-game/*.cs text eol=lf
+extensions/video-game/*.md text eol=lf
