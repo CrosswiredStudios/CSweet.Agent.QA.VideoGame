@@ -10,7 +10,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      NUGET_PACKAGES: ${{ runner.temp }}/clean-packages
+      NUGET_PACKAGES: ${{ github.workspace }}/.artifacts/clean-packages
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
