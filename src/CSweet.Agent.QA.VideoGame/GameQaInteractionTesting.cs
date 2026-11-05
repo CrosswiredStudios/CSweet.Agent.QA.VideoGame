@@ -16,7 +16,10 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
     GameQaJournal journal, GameQaBrowserTesting browser, AgentRuntimeContext context)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private readonly string key = "qa-checks:" + assignment.StageExecutionId.ToString("N") + ":" + journal.Identity;
+    private readonly string key = StateKey(assignment, journal.Identity);
+    internal static string StateKey(WorkExecutionAssignment assignment, string identity) =>
+        "qa-checks:" + (assignment.Scope is "Release" or "Epic" or "Story"
+            ? "delivery:" + assignment.ExecutionId.ToString("N") : assignment.StageExecutionId.ToString("N")) + ":" + identity;
     private readonly GameQaEvidenceTransfer transfer = new(context, journal.Identity);
     private State? state;
     internal bool Pending { get; private set; }

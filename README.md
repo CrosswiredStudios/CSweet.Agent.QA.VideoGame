@@ -17,7 +17,9 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.5.0`
+- Version: `5.5.1`
+
+Release, Epic and Story quality reviews use `DeliveryScopeBrowserTools` for repository-bound Chromium work and `GameQaJournal` for durable observations. Pending compute returns control to the platform and resumes the same exact-candidate evaluation. `GameQaFinalization` obtains a structured report after an early stop or evaluation iteration limit, using evidence reads and report submission only. Aggregate calls use at most 65,536 context and 8,192 output tokens. The matching platform must accept and reconcile quality-stage `awaiting-compute` outcomes. No extra network permissions are required.
 
 Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
 It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages

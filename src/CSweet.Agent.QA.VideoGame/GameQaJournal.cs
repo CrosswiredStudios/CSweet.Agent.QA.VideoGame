@@ -15,8 +15,12 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
     private readonly RevisionSafeProjectState store = new(platform);
     internal string Identity { get; } = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new {
         assignment.OrganizationId, assignment.WorkstreamId, assignment.BoardId, assignment.ItemId, assignment.Scope,
-        assignment.DeliveryPlanId, assignment.ScopeRevision, assignment.StageKey, assignment.AssignmentRevision,
-        assignment.PlanningRevision, input.Planning, sourceIdentity }, Json)));
+        assignment.DeliveryPlanId, assignment.ScopeRevision, assignment.StageKey,
+        AssignmentRevision = assignment.Scope is "Release" or "Epic" or "Story" ? 0 : assignment.AssignmentRevision,
+        assignment.PlanningRevision, input.Planning,
+        sourceIdentity = assignment.Scope is "Release" or "Epic" or "Story"
+            ? sourceIdentity + ":delivery:" + assignment.ExecutionId.ToString("N") + ":" + assignment.AgentInstallationId + ":" + assignment.OrganizationUserId
+            : sourceIdentity }, Json)));
     internal string Key => "game-qa-evidence:" + Identity;
 
     internal AIFunction Observe(AIFunction function) => new ObservedFunction(function, this);

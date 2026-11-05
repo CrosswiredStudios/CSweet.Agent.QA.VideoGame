@@ -8,6 +8,7 @@ namespace CSweet.Agent.QA.VideoGame;
 internal sealed class GameQaInputWorkspace : IAsyncDisposable
 {
     private DeliveryCandidateWorkspace? snapshot;
+    private Guid? candidateRepositoryId;
     private GameQaWorkspace? code;
     private IReadOnlyDictionary<string, string> hashes = new Dictionary<string, string>();
     internal string Path { get; private set; } = "";
@@ -57,8 +58,9 @@ internal sealed class GameQaInputWorkspace : IAsyncDisposable
         }
         else
         {
-            var evidence = await context.Platform.Work.ReadDeliveryEvidenceAsync(new(assignment.DeliveryPlanId!.Value, assignment.ExecutionId), ct);
-            if (evidence.Candidate.Digest != assignment.Candidate!.Digest)
+            var evidence = await context.Platform.Work.ReadDeliveryEvidenceAsync(new(assignment.DeliveryPlanId!.Value, assignment.ExecutionId, candidateRepositoryId), ct);
+            if (evidence.Candidate.Digest != assignment.Candidate!.Digest ||
+                candidateRepositoryId is not null && evidence.CommitSha != Commit)
                 throw new InvalidOperationException("The repository input assignment changed during QA.");
         }
     }
@@ -83,4 +85,22 @@ internal sealed class GameQaInputWorkspace : IAsyncDisposable
         if (code is not null) await context.Platform.Git.CleanupAsync(new(code.Workspace.WorkspaceId, assignment.AssignmentRevision, RetainOnFailure: true), ct);
     }
     public async ValueTask DisposeAsync() { if (snapshot is not null) await snapshot.DisposeAsync(); }
+
+    // The aggregate owns disposal. Browser helpers receive only this repository's immutable files.
+    internal static async Task<GameQaInputWorkspace> FromCandidateAsync(DeliveryCandidateWorkspace workspace,
+        Guid repositoryId, string commit, CancellationToken token)
+    {
+        var result = new GameQaInputWorkspace { Path = System.IO.Path.Combine(workspace.Path, "repositories", repositoryId.ToString("N")),
+            Commit = commit, candidateRepositoryId = repositoryId };
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(result.Path, "*", SearchOption.AllDirectories))
+        {
+            await using var stream = File.OpenRead(file);
+            hashes.Add(System.IO.Path.GetRelativePath(result.Path, file), Convert.ToHexString(await SHA256.HashDataAsync(stream, token)));
+        }
+        if (hashes.Count == 0) throw new InvalidOperationException("The candidate repository contains no original files.");
+        result.hashes = hashes;
+        await GameQaWorkspace.VerifySourceUnchangedAsync(result.Path, hashes, token);
+        return result;
+    }
 }
