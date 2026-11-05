@@ -20,7 +20,7 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
     internal string Key => "game-qa-evidence:" + Identity;
 
     internal AIFunction Observe(AIFunction function) => new ObservedFunction(function, this);
-    internal async Task RecordAsync(string kind, string request, object? result, CancellationToken token)
+    internal async Task<int> RecordAsync(string kind, string request, object? result, CancellationToken token)
     {
         var id=Guid.NewGuid().ToString("N"); var key=Key+":"+id;
         var entry=new Entry(Identity,assignment.AttemptId,DateTimeOffset.UtcNow,kind,request,JsonSerializer.SerializeToElement(result,Json));
@@ -36,7 +36,7 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
         var receipt=new Receipt(Identity,count,Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(data))),kind);
         await store.MergeAsync<Receipt>(key,"video-game.qa-observation.v1",1,current=>current??receipt,
             new Dictionary<string,string>(),key,token);
-        await store.MergeAsync<Index>(Key,"video-game.qa-evidence-index.v1",1,current=> {
+        var index = await store.MergeAsync<Index>(Key,"video-game.qa-evidence-index.v1",1,current=> {
             if(current is not null && current.Identity!=Identity)throw new InvalidOperationException("QA evidence identity changed.");
             var keys=(current?.Entries??[]).Append(key).Distinct(StringComparer.Ordinal).ToArray();
             if(keys.Length>256)throw new InvalidOperationException("QA evidence reached 256 observations; preserve the existing journal and split further validation.");
@@ -44,6 +44,7 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
             return new(Identity,keys,kind=="validated-report"?(sameReportAttempt?current?.ReportKey??key:key):current?.ReportKey,
                 kind=="validated-report"?assignment.AttemptId:current?.ReportAttemptId);
         },new Dictionary<string,string>(),key+":index",token);
+        return Array.IndexOf(index.Payload.Entries.ToArray(), key);
     }
     internal Task SaveReportAsync(GameQaOutcome report,CancellationToken token) => RecordAsync("validated-report","",report,token);
     internal async Task<IReadOnlyList<Entry>> ReadScriptDraftsAsync(CancellationToken token)
@@ -91,18 +92,21 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
     internal async Task<string> ReadEvidenceAsync(CancellationToken token)
     {
         var index=await ReadIndexAsync(token); if(index is null)return "No earlier command journal exists for this exact source and planning.";
-        var entries=new List<object>(); var characters=0;
-        var keys=ObservationKeys(index);
-        foreach(var key in keys.TakeLast(32)) {
-            var entry=await ReadEntryAsync(key,token);var length=JsonSerializer.Serialize(entry,Json).Length;
-            if(characters+length>120000) {
-                entries.Add(new {observationIndex=Array.IndexOf(keys,key),entry.Kind,entry.ObservedAt,pages=(length+19999)/20000,
-                    note="Full output is preserved. Use read_qa_evidence with this observationIndex and zero-based page."});continue;
-            }
-            entries.Add(entry);characters+=length;
+        var entries=new List<object>(); var keys=ObservationKeys(index);
+        foreach(var key in keys.TakeLast(24)) {
+            var entry=await ReadEntryAsync(key,token); var data=JsonSerializer.Serialize(entry,Json);
+            // Full observations remain in the journal. Do not replay script bodies,
+            // dependency listings or old browser results into every recovery prompt.
+            entries.Add(new { observationIndex=Array.IndexOf(keys,key),entry.Kind,entry.ObservedAt,
+                request=entry.Request[..Math.Min(180,entry.Request.Length)], pages=(data.Length+19999)/20000,
+                result=data.Length<=1500 ? entry.Result : (JsonElement?)null,
+                note=data.Length>1500 ? "Full result retained; use read_qa_evidence only for a criterion's missing evidence." : null });
         }
-        return "Historical observed commands for the identical source/planning (not a pass and not fresh browser/device evidence):\n"+JsonSerializer.Serialize(entries,Json);
+        return "Retained exact-source observations (not a new test or verdict). Current browser receipts follow separately. " +
+            "Reuse current exact-source evidence; inspect referenced pages only for unresolved criteria. " +
+            JsonSerializer.Serialize(new { totalObservations=keys.Length, earlierObservations=Math.Max(0,keys.Length-24),entries },Json);
     }
+
     internal AIFunction CreateReadTool() => AIFunctionFactory.Create(async (int observationIndex,int page,CancellationToken token) => {
         var index=await ReadIndexAsync(token);
         var keys=index is null?[]:ObservationKeys(index);
@@ -146,8 +150,12 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
             var result=await InnerFunction.InvokeAsync(arguments,cancellationToken);
             // Do not let cancellation after a completed command discard its observed output.
             using var save=new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await journal.RecordAsync("command",JsonSerializer.Serialize(arguments,Json),result,save.Token);
-            return result;
+            var index=await journal.RecordAsync("command",JsonSerializer.Serialize(arguments,Json),result,save.Token);
+            var data=JsonSerializer.Serialize(result,Json);
+            if(data.Length<=12000)return result;
+            return new { retained=true,observationIndex=index,page=0,
+                note="Large observed output is retained in full. Read the relevant evidence pages; this reference is not a pass.",
+                preview=data[..Math.Min(1600,data.Length)] };
         }
     }
     internal sealed record Entry(string Identity,Guid AttemptId,DateTimeOffset ObservedAt,string Kind,string Request,JsonElement Result);

@@ -9,7 +9,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     internal const int DefaultOutputTokens = 128_000;
     private const int MinimumOutputTokens = 1_000;
     public override string AgentId => "com.csweet.video-game-qa";
-    public override string Version => "5.4.11";
+    public override string Version => "5.5.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -17,7 +17,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 minimum: 16_000, step: 1_000,
                 defaultValue: DefaultContextWindowTokens)
             .Number("maxOutputTokens", "Maximum output tokens", required: true,
-                description: "Budget for each QA model response, including reasoning. Set this within the selected model and provider's supported limits.",
+                description: "Maximum response budget including reasoning; exact-source code QA uses at most 8192 output and 65536 context tokens. Set this within the selected model and provider's supported limits.",
                 minimum: MinimumOutputTokens, step: 1_000,
                 defaultValue: DefaultOutputTokens,
                 lessThanFieldKey: "maxContextWindowTokens");

@@ -55,15 +55,8 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             var bytes = await ArchiveAsync(source.Path, buildDirectory, token);
             await source.VerifyAsync(assignment, context, token);
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-            for (var offset = 0; offset < bytes.Length; offset += 18000)
-            {
-                var part = Convert.ToBase64String(bytes, offset, Math.Min(18000, bytes.Length - offset));
-                await new RevisionSafeProjectState(context.Platform).MergeAsync<ArchivePart>($"qbb:{hash}:{offset}",
-                    "video-game.qa-browser-build-part.v1", 1, current => current is null || current.Base64 == part
-                        ? new(part) : throw new InvalidOperationException("Retained browser build bytes changed."),
-                    new Dictionary<string, string>(), $"qbb:{hash}:{offset}", token);
-            }
-            state = new(source.Commit, source.SourceIdentity, hash, bytes.Length, viewportWidths.ToArray(), requireWebGl);
+            var input = await context.Platform.Compute.StageBuildAsync(source.Commit, bytes, token);
+            state = new(source.Commit, source.SourceIdentity, hash, bytes.Length, viewportWidths.ToArray(), requireWebGl, BuildInput: input);
             await SaveAsync(token);
             await journal.RecordAsync("browser-build", buildDirectory,
                 new { source.Commit, source.SourceIdentity, BuildSha256 = hash, BuildBytes = bytes.Length }, token);
@@ -142,6 +135,15 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
                 current.Generation != operation.Generation)
                 throw new InvalidOperationException("Browser compute returned a different operation identity.");
             if (operation.Status is "Pending" or "Dispatching" or "Reconciling") return;
+            if (request.Kind == "build-archive")
+            {
+                var receipt = operation.Result?.BuildArchive;
+                if (operation.Status != "Completed" || operation.Result?.ErrorCode is not null || receipt is null ||
+                    receipt.SourceCommitSha != state.Commit || receipt.BuildSha256 != state.BuildSha256 || receipt.Length != state.BuildBytes)
+                    throw new InvalidOperationException("The exact build transfer has no valid completion receipt; no browser test was run.");
+                state = state with { Step = state.Step + 1, UploadOffset = state.BuildBytes, Pending = null, OperationId = null };
+                await SaveAsync(token); await AdvanceAsync(token); return;
+            }
             if (operation.Status == "Completed" && operation.Result?.ErrorCode == "outcome-unknown" && request.Kind == "artifact")
             {
                 if (state.EvidenceReadRecoveries >= 2)
@@ -222,7 +224,10 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         if (current.State != "ready" && state.Report is null) return;
         var root = "/var/lib/csweet-compute/work/browser-" + state.BuildSha256;
         BrowserRequest next;
-        if (state.Step == 0)
+        if (state.BuildInput is { } input && state.UploadOffset < state.BuildBytes)
+            next = new(Guid.NewGuid(), "build-archive", current.Generation, $"{key}:build-archive",
+                JsonSerializer.SerializeToElement(new { buildArchive = input }, Json), state.BuildBytes);
+        else if (state.Step == 0)
             next = Command("prepare", $"mkdir -p {root}/evidence\n: > {root}/build.zip", state.UploadOffset);
         else if (state.UploadOffset < state.BuildBytes)
         {
@@ -345,7 +350,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
     internal sealed record BrowserState(string Commit, string SourceIdentity, string BuildSha256, int BuildBytes,
         IReadOnlyList<int> Widths, bool RequireWebGl, Guid? EnvironmentId = null, int Step = 0, int UploadOffset = 0,
         BrowserRequest? Pending = null, Guid? OperationId = null, BrowserReport? Report = null, int EvidenceOffset = 0, bool Complete = false,
-        Guid? TestOperationId = null, int Cursor = 0, int UploadRecoveries = 0, int EvidenceReadRecoveries = 0);
+        Guid? TestOperationId = null, int Cursor = 0, int UploadRecoveries = 0, int EvidenceReadRecoveries = 0, ComputeBuildArchiveInput? BuildInput = null);
     internal sealed record BrowserRequest(Guid RequestId, string Kind, long ExpectedGeneration, string IdempotencyKey, JsonElement Workload, int NextOffset);
     internal sealed record BrowserReport(Guid RequestId, string SourceCommitSha, string BuildSha256, string BrowserVersion,
         bool Passed, IReadOnlyList<ViewportResult> Viewports, string EvidenceSha256, int EvidenceBytes);

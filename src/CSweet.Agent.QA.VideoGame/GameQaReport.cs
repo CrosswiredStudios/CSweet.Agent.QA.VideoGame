@@ -207,7 +207,7 @@ internal static partial class GameQaExecution
     {
         var status=(int?)error.StatusCode;
         var retryable=status is null or 408 or 429 || status>=500;
-        return AgentWorkResult.Failure("QA transport failed before delivery completed. Retained exact-source evidence is available for workflow recovery; no new verdict was granted.",
+        return AgentWorkResult.Failure($"QA transport failed before delivery completed (HTTP {status?.ToString() ?? "unavailable"}; {error.HttpRequestError}). Retained exact-source evidence is available for workflow recovery; no new verdict was granted.",
             retryable ? "runtime.transport" : "agent.rejected",retryable);
     }
 }

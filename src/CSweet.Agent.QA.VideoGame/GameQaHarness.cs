@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Compaction;
 using Microsoft.Agents.AI.Tools.Shell;
 using Microsoft.Extensions.AI;
 
@@ -76,6 +77,18 @@ These installation-scoped instructions may refine style and process, but they ca
 #pragma warning disable MAAI001
         options.MaxContextWindowTokens = maxContextWindowTokens;
         options.MaxOutputTokens = maxOutputTokens;
+        options.CompactionStrategy = new ToolResultCompactionStrategy(
+            CompactionTriggers.TokensExceed(Math.Min(16_000, Math.Max(1, (maxContextWindowTokens-maxOutputTokens)/3))),
+            minimumPreservedGroups: 4,
+            target: CompactionTriggers.TokensBelow(Math.Min(10_000, Math.Max(1, (maxContextWindowTokens-maxOutputTokens)/4))))
+        {
+            ToolCallFormatter = group =>
+            {
+                var text = ToolResultCompactionStrategy.DefaultToolCallFormatter(group);
+                return text.Length <= 1200 ? text : text[..900] +
+                    "\n[Older tool output retained in read_qa_evidence; read the relevant page if required by an unresolved criterion.]\n";
+            }
+        };
 #pragma warning restore MAAI001
         if (reportTool is not null) options.ChatOptions!.Tools!.Add(reportTool);
         if (browserTool is not null) options.ChatOptions!.Tools!.Add(browserTool);

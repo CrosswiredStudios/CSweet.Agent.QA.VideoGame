@@ -45,7 +45,13 @@ public sealed class GameQaUnattendedTests
         var context=runtime.CreateContext();var journal=new GameQaJournal(assignment,input,"exact-files",context.Platform);
         var command=journal.Observe(AIFunctionFactory.Create(()=>"exit=0; 12 actual checks passed","execute_workspace_command"));
         await command.InvokeAsync(new AIFunctionArguments());
-        await journal.RecordAsync("command","large retained output",new string('\u00f6',128000),default);
+        var large = journal.Observe(AIFunctionFactory.Create(()=>new string('\u00f6',128000),"large_command"));
+        var reference=JsonSerializer.SerializeToElement(await large.InvokeAsync(new AIFunctionArguments()));
+        Assert.True(reference.GetProperty("retained").GetBoolean());
+        Assert.Equal(1,reference.GetProperty("observationIndex").GetInt32());
+        Assert.True(reference.GetRawText().Length<2200);
+        var brief=await journal.ReadEvidenceAsync(default);
+        Assert.True(brief.Length<3000); Assert.Contains("observationIndex",brief);
         Assert.True(states.Keys.Count(x=>x.Contains(":part:",StringComparison.Ordinal))>30);
         var page=Assert.IsType<JsonElement>(await journal.CreateReadTool().InvokeAsync(new AIFunctionArguments { ["observationIndex"]=1,["page"]=1 }));
         Assert.True(page.GetProperty("found").GetBoolean());Assert.True(page.GetProperty("pages").GetInt32()>1);

@@ -12,6 +12,8 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 public sealed class BrowserRecoveryTests
 {
     [Fact]
+    public Task Static_build_upload_uses_one_compute_generation_for_all_retained_bytes() => RunRecoveryAsync(false,"bulk-transfer");
+    [Fact]
     public Task Corrected_script_wait_tracks_current_operation_after_prior_export_in_same_callback() =>
         RunRecoveryAsync(false,"interaction-wait");
     [Fact]
@@ -98,7 +100,7 @@ public sealed class BrowserRecoveryTests
         var operations = new Dictionary<Guid, ComputeOperation>();
         var artifacts = new Dictionary<Guid, byte[]>();
         var submissions = new Dictionary<string, (JsonElement Input, Guid Id)>();
-        var browserLaunches = 0; var interactionLaunches = 0; var lostReply = false;
+        var buildTransfers = 0; var browserLaunches = 0; var interactionLaunches = 0; var lostReply = false;
         var interactions = scenario.StartsWith("interaction",StringComparison.Ordinal);
         var unknownUpload = false; byte[] remotePart = []; var probes=0; var repairs=0;
         var evidence = scenario=="legacy-partial" ? new byte[500000] : Encoding.UTF8.GetBytes("fixture screenshots and trace bytes");
@@ -178,6 +180,21 @@ public sealed class BrowserRecoveryTests
                         lostEvidenceReadReply=true;throw new IOException("Lost export reply after acceptance");
                     }
                     return Task.FromResult(archived);
+                }
+                if(workload.TryGetProperty("buildArchive", out var bulk))
+                {
+                    buildTransfers++;
+                    var descriptor=bulk.Deserialize<ComputeBuildArchiveInput>(json)!;
+                    var parts=states.Values.Where(x=>x.SchemaId=="compute.build-input-part.v1")
+                        .Select(x=>x.Payload.Deserialize<ComputeBuildInputPart>(json)!).OrderBy(x=>x.Offset).ToArray();
+                    var all=parts.SelectMany(x=>x.Content).ToArray();
+                    Assert.Equal(descriptor.Length,all.Length);
+                    Assert.Equal(descriptor.BuildSha256,Convert.ToHexStringLower(SHA256.HashData(all)));
+                    environment=environment with{Generation=environment.Generation+1};
+                    var transferred=new ComputeOperation(Guid.NewGuid(),environmentId,environment.Generation,"Pending",null,
+                        new(BuildArchive:new(descriptor.SourceCommitSha,descriptor.BuildSha256,descriptor.Length)));
+                    operations[transferred.Id]=transferred; submissions[key]=(request.Clone(),transferred.Id);
+                    return Task.FromResult(transferred);
                 }
                 var browser = workload.TryGetProperty("browserTest", out var specification);
                 var command = browser ? null : workload.GetProperty("command").Deserialize<ComputeCommand>(json)!;
@@ -281,8 +298,29 @@ public sealed class BrowserRecoveryTests
             await Assert.ThrowsAnyAsync<Exception>(async () => await historyTool.InvokeAsync(new AIFunctionArguments { ["offset"] = 0, ["limit"] = 20 }));
             wrongHistory = false;
             await Assert.ThrowsAnyAsync<Exception>(async () => await historyTool.InvokeAsync(new AIFunctionArguments { ["offset"] = -1, ["limit"] = 20 }));
+            if(scenario=="bulk-transfer") {
+                var asset=new byte[530000];RandomNumberGenerator.Fill(asset);
+                await File.WriteAllBytesAsync(Path.Combine(source.Path,"dist","fixture.bin"),asset);
+            }
+            var legacyUpload=scenario is "uploaded" or "missing" or "conflicting" or "legacy-partial";
+            if(legacyUpload)
+            {
+                var bytes=await GameQaBrowserTesting.ArchiveAsync(source.Path,"dist",default);
+                var hash=Convert.ToHexStringLower(SHA256.HashData(bytes));
+                for(var offset=0;offset<bytes.Length;offset+=18000) {
+                    var partKey=$"qbb:{hash}:{offset}";
+                    await context.Platform.WriteOperatingStateAsync(new(partKey,"video-game.qa-browser-build-part.v1",1,"Active",
+                        new Dictionary<string,string>(),[],partKey,[],Guid.NewGuid(),
+                        JsonSerializer.SerializeToElement(new GameQaBrowserTesting.ArchivePart(Convert.ToBase64String(bytes,offset,Math.Min(18000,bytes.Length-offset))),json),null,partKey));
+                }
+                var stateKey="qa-browser:"+journal.Identity;
+                await context.Platform.WriteOperatingStateAsync(new(stateKey,"video-game.qa-browser-state.v1",1,"Active",
+                    new Dictionary<string,string>(),[],stateKey,[],Guid.NewGuid(),
+                    JsonSerializer.SerializeToElement(new GameQaBrowserTesting.BrowserState(source.Commit,source.SourceIdentity,hash,bytes.Length,[375,1280],true),json),null,stateKey));
+            }
             var testing = new GameQaBrowserTesting(assignment, source, journal, context);
-            Assert.Throws<InvalidOperationException>(() => testing.WaitOutcome());
+            if(legacyUpload)await testing.ResumeAsync(default);
+            if (!legacyUpload) Assert.Throws<InvalidOperationException>(() => testing.WaitOutcome());
             if (!preparationReady)
             {
                 await Assert.ThrowsAnyAsync<Exception>(async () => await testing.Tool().InvokeAsync(
@@ -295,7 +333,7 @@ public sealed class BrowserRecoveryTests
                 testing = new GameQaBrowserTesting(assignment with { AttemptId = Guid.NewGuid() }, source, journal, context);
                 await testing.ResumeAsync(default);
             }
-            else
+            else if (!legacyUpload)
             await testing.Tool().InvokeAsync(new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true });
             Assert.True(testing.Pending);
             Assert.Equal("awaiting-compute", testing.WaitOutcome().OutcomeCode);
@@ -306,7 +344,8 @@ public sealed class BrowserRecoveryTests
             }
             Assert.False(testing.Pending);
             Assert.Equal(1, browserLaunches);
-            Assert.Equal(scenario == "none" || scenario == "legacy-partial" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) || scenario.StartsWith("evidence-read-",StringComparison.Ordinal) ? 0 : 1,probes);
+            Assert.Equal(legacyUpload?0:1,buildTransfers);
+            Assert.Equal(scenario == "none" || scenario == "bulk-transfer" || scenario == "legacy-partial" || interactions || scenario.StartsWith("unready-", StringComparison.Ordinal) || scenario.StartsWith("evidence-read-",StringComparison.Ordinal) ? 0 : 1,probes);
             Assert.Equal(scenario == "missing" ? 1 : 0,repairs);
             Assert.Contains("Observed browser compute evidence", testing.Evidence);
             Assert.Equal(3, testing.ExecutionEvidence.Count);

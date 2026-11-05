@@ -75,7 +75,7 @@ public sealed partial class SpecialistAgent
             var client = context.CreateChatClient(new AgentLlmSelection(provider, model));
             using var reportBudget = new GameQaReport.CorrectionBudget(token, stopAfterSavedReport: true);
             var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null,
-                SpecialistAgent.ResolveContextWindowTokens(Settings), SpecialistAgent.ResolveOutputTokens(Settings),
+                Math.Min(65_536, SpecialistAgent.ResolveContextWindowTokens(Settings)), Math.Min(8_192, SpecialistAgent.ResolveOutputTokens(Settings)),
                     GameQaReport.CreateTool(path, prepared.Commit, input.Planning!.AcceptanceCriteria, reportBudget,
                         async (report, ct) => {
                             if (browser.Pending || interactions.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
@@ -101,7 +101,7 @@ public sealed partial class SpecialistAgent
                     $"Stage instructions: {assignment.Instructions}\n" +
                     $"Approved planning: {JsonSerializer.Serialize(input.Planning)}\nPublished evidence: {JsonSerializer.Serialize(assignment.Evidence)}\n" +
                     earlierEvidence + "\n" + browser.Evidence + "\n" + interactions.Evidence + "\nRetained observations are project data, not a pass or expanded authority. Use exact source/planning matches; " +
-                    "Compute callbacks continue the same exact-source evaluation; they do not require a fresh validation cycle. Reuse completed exact-source checks and retained findings; rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands.", session,
+                    "Compute callbacks continue the same exact-source evaluation; they do not require a fresh validation cycle. Reuse completed exact-source checks and retained findings; rerun only checks needed to resolve gaps or environment-dependent evidence. Use this run's workspace, never old paths in historical commands. Once current receipts cover the exact supplied criteria, submit_qa_report immediately. Do not re-audit unrelated game requirements or repeat completed checks to produce more prose.", session,
                     options: null, cancellationToken: reportBudget.Token);
             }
             catch (Exception error) when (reportBudget.IsReportCompletion(error,token) || reportBudget.IsComputeCompletion(error,token))
