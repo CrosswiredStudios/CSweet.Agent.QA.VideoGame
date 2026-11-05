@@ -283,8 +283,13 @@ internal static partial class GameQaExecution
         Do not retype hashes into evidence prose; refer to the assigned commit. The submission tool saves .csweet/qa-outcome.json with sourceCommitSha, summary, passed (boolean), validations (array of command,
         succeeded, exitCode, diagnosticExcerpt), and findings (array). Every validation MUST include a nonblank
         diagnosticExcerpt copied from that command's observed output, including failed commands. Evidence in
-        summary or criteria does not replace this field. For example, after actually running npm list phaser,
-        retain its observed dependency tree in diagnosticExcerpt; do not submit only the command and exit code.
+        summary or criteria does not replace this field.
+        Distinguish unresolved candidate failures from invalid or superseded QA checks. The journal retains every
+        historical observation. Report the current, valid executed checks in validations, and explain superseded
+        harness failures in summary with the actual corrected check and its observed result. Never hide a real
+        unresolved candidate failure. Saved corrected scripts are not passing evidence until executed.
+        For example, after actually running npm list phaser, retain its observed dependency tree in diagnosticExcerpt;
+        do not submit only the command and exit code.
         If a command is silent, execute an appropriate observable check or retain another relevant command's output;
         never invent output or a placeholder to satisfy submission. Report actual command output and reproducible
         defects. Also include criteria (array of criterion, satisfied, evidence), covering each exact assigned acceptance
@@ -322,7 +327,9 @@ internal static partial class GameQaExecution
             issues.Add("Every validation requires a nonblank diagnosticExcerpt from that command's actual observed output. Summary and criterion evidence do not replace command output. Preserve real failures; never invent output or placeholders.");
         if (outcome.Findings is null) issues.Add("findings must be an array of unresolved blockers, or [] when none remain.");
         if (outcome.Passed && outcome.Validations?.Any(x => x is not null && (!x.Succeeded || x.ExitCode != 0)) == true)
-            issues.Add("passed=true conflicts with failed validation commands; report passed=false and preserve the failed results.");
+            issues.Add("passed=true conflicts with failed validation commands. Preserve unresolved candidate failures with passed=false. " +
+                "For an invalid or superseded harness check, execute its corrected check first; retain the historical failure in the journal and summary, " +
+                "and report the current executed validations. A saved correction is not passing evidence.");
         if (outcome.Passed && outcome.Findings is { Count: > 0 })
             issues.Add("passed=true requires findings=[]. findings contains unresolved BLOCKERS only. Move nonblocking observations and optional verification notes into summary, not findings. Preserve real defects and use passed=false when blockers remain.");
         if (issues.Count != 0) throw new InvalidOperationException(string.Join("; ", issues));

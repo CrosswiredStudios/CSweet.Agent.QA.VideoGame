@@ -67,6 +67,11 @@ public sealed partial class SpecialistAgent
                 { throw new InvalidOperationException(reportBudget.FailureMessage); }
                 if (browsers.Pending) return AgentWorkResult.Success(browsers.WaitOutcome());
                 if (reportBudget.AcceptedReport is null)
+                {
+                    await browsers.ExecuteSavedDraftsAsync(token);
+                    if (browsers.Pending) return AgentWorkResult.Success(browsers.WaitOutcome());
+                }
+                if (reportBudget.AcceptedReport is null)
                     await GameQaFinalization.RunAsync(client, reportTool, journal.CreateReadTool(),
                         "Submit the report from these actual observations; do not restart validation.\n" +
                         JsonSerializer.Serialize(new { Candidate = candidate, input.Planning }) + "\n" +

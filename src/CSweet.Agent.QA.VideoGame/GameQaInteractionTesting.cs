@@ -24,6 +24,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
     private State? state;
     internal bool Pending { get; private set; }
     internal bool Failed => state?.Report is { Passed: false };
+    internal bool HasScript(string script) => state?.ScriptSha256 == Hash(Encoding.UTF8.GetBytes(script));
     internal string Evidence => state?.Report is {} report ?
         "Observed independent Chromium behavior checks (not other browsers/devices):\n" + JsonSerializer.Serialize(report,Json) +
         "\nThe exact authored test, screenshot, trace and result are retained in read_qa_evidence." : "";

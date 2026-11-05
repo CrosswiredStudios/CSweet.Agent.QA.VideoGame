@@ -23,6 +23,12 @@ internal sealed class GameQaBrowserScripts(WorkExecutionAssignment assignment,Ga
         return new{testScriptPath=relative,note="Independent test draft saved, not executed. Call test_web_interactions with this path. It is restored on source-bound continuation."};
     },"save_browser_test_script","Save the body of a focused async Playwright test receiving page, context, origin and check(name,boolean,evidence). This writes only a content-addressed untracked qa/browser-*.cjs draft, never tracked source. It durably retains the exact script and restores drafts after workspace replacement. Supply script as text; no shell/heredoc quoting is needed, and Phaser shutdown event names are ordinary test data. This does not execute or pass any check. Use page.evaluate(fn,{...}) for multiple values; inspect real APIs rather than relying on mock-only fields. Then call test_web_interactions with the returned path.");
 
+    internal async Task<Draft?> LatestDraftAsync(CancellationToken token)
+    {
+        var entry = (await journal.ReadScriptDraftsAsync(token)).LastOrDefault(e => e.Kind == "browser-test-script");
+        return entry?.Result.Deserialize<Draft>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
     internal async Task RestoreAsync(CancellationToken token)
     {
         var drafts=new Dictionary<string,string>(StringComparer.Ordinal);

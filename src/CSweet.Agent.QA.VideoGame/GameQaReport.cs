@@ -51,6 +51,7 @@ internal static class GameQaReport
         internal CancellationToken Token => stop.Token;
         internal string FailureMessage { get; private set; } = "";
         internal Submission? LastRejection { get; private set; }
+        internal JsonElement? LastDraft { get; set; }
         internal Submission RecordFailure(Submission feedback)
         {
             LastRejection = feedback;
@@ -89,6 +90,7 @@ internal static class GameQaReport
             try
             {
                 var normalized = NormalizeArguments(arguments, commit);
+                if (budget is not null) budget.LastDraft = JsonSerializer.SerializeToElement(normalized, JsonOptions);
                 var report = JsonSerializer.Deserialize<GameQaOutcome>(JsonSerializer.Serialize(normalized, JsonOptions), JsonOptions);
                 var issues = new List<string>();
                 try { GameQaExecution.ValidateOutcome(report, commit); }

@@ -17,7 +17,9 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.5.1`
+- Version: `5.5.2`
+
+`DeliveryScopeBrowserTools.ExecuteSavedDraftsAsync` finishes the latest source-bound saved browser test before aggregate reporting, using retained request identities for pending work. `GameQaFinalization` reserves four structured-report submissions after its evidence-reading phase so a late schema correction can execute. Code invokes the validated report function from the returned fields; failed tests, unknown execution and unexecuted drafts cannot become a pass. This uses the SDK's existing response-schema transport, without relying on required tool-choice forwarding.
 
 Release, Epic and Story quality reviews use `DeliveryScopeBrowserTools` for repository-bound Chromium work and `GameQaJournal` for durable observations. Pending compute returns control to the platform and resumes the same exact-candidate evaluation. `GameQaFinalization` obtains a structured report after an early stop or evaluation iteration limit, using evidence reads and report submission only. Aggregate calls use at most 65,536 context and 8,192 output tokens. The matching platform must accept and reconcile quality-stage `awaiting-compute` outcomes. No extra network permissions are required.
 

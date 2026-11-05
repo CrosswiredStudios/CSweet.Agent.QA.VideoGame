@@ -34,6 +34,22 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
             if (repository.Interactions.Pending) return;
             await repository.Scripts.RestoreAsync(token);
         }
+        await ExecuteSavedDraftsAsync(token);
+    }
+    internal async Task ExecuteSavedDraftsAsync(CancellationToken token)
+    {
+        if (Pending) return;
+        foreach (var repository in repositories.Values)
+        {
+            // A saved source-bound draft is pending work, not an executed check. Drain only
+            // the latest authored script; an admitted/unknown/completed request is never reset.
+            if (repository.Browser.CompletedBuild is null) continue;
+            var draft = await repository.Scripts.LatestDraftAsync(token);
+            if (draft is null || repository.Interactions.HasScript(draft.Script)) continue;
+            await repository.Scripts.RestoreAsync(token);
+            await repository.Interactions.Tool().InvokeAsync(new() { ["testScriptPath"] = draft.Path }, token);
+            if (Pending) return;
+        }
     }
     private Repository Select(string repositoryId)
     {
