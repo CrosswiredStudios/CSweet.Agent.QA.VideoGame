@@ -12,8 +12,10 @@ internal sealed class GameQaEvidenceTransfer(AgentRuntimeContext context, string
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     internal Guid? OperationId { get; private set; }
+    internal Guid? PendingOperationId { get; private set; }
     internal async Task<byte[]?> ReadAsync(ComputeEnvironment environment, ComputeEvidenceArchive archive, CancellationToken token)
     {
+        PendingOperationId = null;
         var key = "qa-archive:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity + JsonSerializer.Serialize(archive, Json))));
         var saved = (await context.Platform.ReadOperatingStateAsync<State>(key, token))?.Payload;
         if (saved is null && environment.State != "ready") return null;
@@ -27,7 +29,8 @@ internal sealed class GameQaEvidenceTransfer(AgentRuntimeContext context, string
         OperationId = operation.Id;
         if (operation.EnvironmentId != environment.Id || operation.Generation != state.Request.ExpectedGeneration + 1)
             throw new InvalidOperationException("Evidence export scope changed.");
-        if (operation.Status is "Pending" or "Dispatching" or "Reconciling") return null;
+        if (operation.Status is "Pending" or "Dispatching" or "Reconciling")
+        { PendingOperationId = operation.Id; return null; }
         if (operation.Status == "Completed" && operation.Result?.ErrorCode == "outcome-unknown")
         {
             if (state.Recoveries >= 2) throw new InvalidOperationException("Evidence archive read recovery exceeded its budget.");
@@ -37,6 +40,7 @@ internal sealed class GameQaEvidenceTransfer(AgentRuntimeContext context, string
             await SaveAsync();
             operation = await context.Platform.Compute.ExportEvidenceAsync(state.Request, token);
             state = state with { OperationId = operation.Id }; await SaveAsync(); OperationId = operation.Id;
+            PendingOperationId = operation.Id;
             return null;
         }
         if (operation.Status != "Completed" || operation.Result is not { ErrorCode: null, Artifact: { } artifact } ||

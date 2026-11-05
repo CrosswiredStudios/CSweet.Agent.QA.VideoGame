@@ -12,6 +12,9 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 public sealed class BrowserRecoveryTests
 {
     [Fact]
+    public Task Corrected_script_wait_tracks_current_operation_after_prior_export_in_same_callback() =>
+        RunRecoveryAsync(false,"interaction-wait");
+    [Fact]
     public async Task Export_actual_behavior_requests_for_platform_schema_acceptance()
     {
         var requested=Environment.GetEnvironmentVariable("CSWEET_QA_REQUEST_EXPORT");
@@ -313,9 +316,11 @@ public sealed class BrowserRecoveryTests
                     (scenario=="interaction-export"?"\n// "+new string('x',11600):""));
                 var behavior=new GameQaInteractionTesting(assignment,source,journal,testing,context);
                 await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                AssertCurrentWait(behavior);
                 for(var turn=0;turn<10 && behavior.Pending;turn++) {
                     behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
                     try{await behavior.ResumeAsync(default);}catch(IOException) when(lostReply){continue;}
+                    AssertCurrentWait(behavior);
                 }
                 Assert.False(behavior.Pending);Assert.False(behavior.Failed);Assert.Equal(1,interactionLaunches);
                 Assert.Contains("Observed independent Chromium behavior",behavior.Evidence);
@@ -323,9 +328,11 @@ public sealed class BrowserRecoveryTests
                 for(var plan=2;plan<=5;plan++) {
                     await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// A separate focused check plan "+plan);
                     await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                    AssertCurrentWait(behavior);
                     for(var turn=0;turn<10 && behavior.Pending;turn++) {
                         behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
                         await behavior.ResumeAsync(default);
+                        AssertCurrentWait(behavior);
                     }
                     Assert.False(behavior.Pending);Assert.Equal(plan,interactionLaunches);
                 }
@@ -341,6 +348,18 @@ public sealed class BrowserRecoveryTests
                 Assert.Equal("await page.goto(origin);",await File.ReadAllTextAsync(Path.Combine(source.Path,"qa","legacy.mjs")));
                 await File.AppendAllTextAsync(Path.Combine(source.Path,"src","game.js"),"changed");
                 await Assert.ThrowsAsync<InvalidOperationException>(()=>behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"}).AsTask());
+            }
+            void AssertCurrentWait(GameQaInteractionTesting behavior)
+            {
+                if (!behavior.Pending) return;
+                var wait = behavior.WaitOutcome();
+                Assert.Equal(commit, wait.Output.GetProperty("sourceCommitSha").GetString());
+                foreach (var operationId in wait.Output.GetProperty("operationIds").EnumerateArray())
+                {
+                    var operation = operations[operationId.GetGuid()];
+                    Assert.Equal(environmentId, operation.EnvironmentId);
+                    Assert.Equal(environment.Generation, operation.Generation);
+                }
             }
             if(scenario.Contains("evidence-read-unknown",StringComparison.Ordinal)) Assert.True(evidenceReads>=2);
             Assert.DoesNotContain(states.Values, state => state.Payload.TryGetProperty("Outcome", out _));

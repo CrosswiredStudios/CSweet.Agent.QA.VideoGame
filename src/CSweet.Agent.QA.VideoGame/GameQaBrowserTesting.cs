@@ -21,7 +21,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
     internal bool Pending { get; private set; }
     internal string Evidence { get; private set; } = "";
     internal bool Failed => state?.Report is { Passed: false };
-    internal Guid? OperationId => transfer.OperationId ?? state?.OperationId;
+    internal Guid? OperationId => state?.Pending is not null ? state.OperationId : transfer.PendingOperationId;
     internal Guid? EnvironmentId => state?.EnvironmentId;
     internal string? BuildSha256 => state?.BuildSha256;
     internal BrowserState? CompletedBuild => state is { Complete: true } ? state : null;
