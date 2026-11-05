@@ -17,7 +17,7 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.4.9`
+- Version: `5.4.10`
 
 Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
 It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages
@@ -273,3 +273,11 @@ Browser interaction tests support the local static server and `file:///tmp/build
 ## Evidence archive transfer
 
 Version 5.4.9 uses SDK 5.7.1 exports to retain browser evidence under one durable compute operation. Pending legacy chunk requests finish normally; retained source/build/script hashes remain pinned and completed tests are not replayed. QA reads the retained artifact within one callback, verifies its full digest and parses assertions before any verdict. Binary screenshots/traces stay with the artifact; the QA journal records its operation ID, digest and length.
+
+## Sprint execution improvements (5.4.10)
+
+- Prevent a passing browser-visible acceptance report without completed real-browser evidence bound to the exact source identity and build. Failed or unavailable browser checks cannot become a green report.
+- Require observed canvas evidence for canvas criteria while allowing Phaser's accepted renderer; do not invent a WebGL commitment or mobile viewport matrix for desktop-only work.
+- Explicitly hand off the assigned immutable commit and actual target branch. Historical main-branch prose cannot substitute a different snapshot; genuine final-main criteria remain pending downstream evidence.
+
+Independent QA, current-source verification and durable compute continuation remain required. Apply through the normal published release and Installed Agents flow.

@@ -59,6 +59,7 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException("The retained report conflicts with the observed browser failure.");
             if (standalone && savedReport is not null)
             {
+                BrowserAcceptance.Validate(input.Planning!, savedReport, prepared.SourceIdentity, browser.CompletedBuild);
                 GameQaExecution.ValidateOutcome(savedReport, prepared.Commit);
                 GameQaExecution.ValidateCriterionCoverage(savedReport, input.Planning!.AcceptanceCriteria);
                 await prepared.VerifyAsync(assignment, context, token);
@@ -79,6 +80,7 @@ public sealed partial class SpecialistAgent
                         async (report, ct) => {
                             if (browser.Pending || interactions.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
                             if ((browser.Failed || interactions.Failed) && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
+                            BrowserAcceptance.Validate(input.Planning!, report, prepared.SourceIdentity, browser.CompletedBuild);
                             await prepared.VerifyAsync(assignment, context, ct); await journal.SaveReportAsync(report, ct);
                         }), journal, browser.Tool(reportBudget.PauseForCompute), prepared.HistoryTool(assignment, context, journal),
                         interactions.Tool(reportBudget.PauseForCompute), scripts.Tool(),
@@ -90,6 +92,7 @@ public sealed partial class SpecialistAgent
             try
             {
                 response = await harness.RunAsync($"Validate commit {prepared.Commit}.\n" +
+                    BrowserAcceptance.Handoff(prepared.Commit, assignment.Candidate?.Repositories.SingleOrDefault()?.TargetBranch ?? delivery.BaseBranch) + "\n" +
                     $"Platform-verified source snapshot: commit {prepared.Commit}, " +
                     $"{prepared.SourceCount} original files checked against the broker-authorized snapshot before this run. " +
                     "Source hashes and current input authority will be checked again after your report. " +
@@ -128,6 +131,7 @@ public sealed partial class SpecialistAgent
                     "Observed commands are preserved in journal " + journal.Key + ". No approval or QA verdict was granted; escalate the harness configuration to management.");
             var outcome = reportBudget.AcceptedReport ?? await GameQaReport.ReadAsync(path, token, reportBudget.LastRejection);
             var verdict = GameQaExecution.ValidateOutcome(outcome, prepared.Commit);
+            BrowserAcceptance.Validate(input.Planning!, outcome!, prepared.SourceIdentity, browser.CompletedBuild);
             GameQaExecution.ValidateCriterionCoverage(outcome!, input.Planning!.AcceptanceCriteria);
             await prepared.VerifyAsync(assignment, context, token);
             var needsDecision = GameQaExecution.RequiresDecision(outcome!);
@@ -242,7 +246,8 @@ internal static partial class GameQaExecution
         intentionally lacks .git. Evaluate actual commit subjects and parent/ancestry evidence. Follow history pages
         until NextOffset is null. Default-branch ancestry does not prove a historical branch creation event. Never
         claim old commits follow conventional format merely because newer commits do. QA cannot publish or rewrite Git.
-        Normally test widths 375 and 1280 with requireWebGl=true for Phaser/WebGL games. Do not replace browser
+        Use only the accepted viewport targets: for desktop Chromium alone start with [1280], not an invented mobile matrix.
+        Require WebGL only when the accepted criteria require that renderer; Phaser AUTO/CANVAS is not a WebGL commitment. Do not replace browser
         execution with a DOM mock, HTTP 200 or a Node import. When test_web_build returns pending, finish the turn
         without submitting a QA report or polling; the platform resumes the same source-bound test from compute events.
         Browser smoke evidence establishes startup and loading only; gameplay, input, FPS and real devices need their own checks.

@@ -74,7 +74,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         if(Pending)onPending?.Invoke();
         return new { pending = Pending, evidence = Evidence, operationId = OperationId,
             instruction = Pending ? "Compute is running. Finish this turn; the platform resumes QA automatically. Do not poll or claim a browser pass." : "Assess the observed browser results against the exact acceptance criteria." };
-    }, "test_web_build", "Test the actual static web build from this assigned source in isolated compute with Playwright and Chromium. First build the project, then supply its workspace-relative output directory (for example dist), viewportWidths (normally [375,1280]) and requireWebGl. Source and build hashes are bound by code. Returns pending while transferring/testing; finish the turn without a verdict and QA resumes automatically. Screenshots and traces are retained in the QA evidence journal. This smoke test does not establish gameplay, FPS or device compatibility.");
+    }, "test_web_build", "Test the actual static web build from this assigned source in isolated compute with Playwright and Chromium. First build the project, then supply its workspace-relative output directory (for example dist), accepted viewportWidths (desktop-only normally [1280]) and requireWebGl only if that renderer is required. Source and build hashes are bound by code. Returns pending while transferring/testing; finish the turn without a verdict and QA resumes automatically. Screenshots and traces are retained in the QA evidence journal. This smoke test does not establish gameplay, FPS or device compatibility.");
 
     internal WorkExecutionOutcomeV1 WaitOutcome()
     {
