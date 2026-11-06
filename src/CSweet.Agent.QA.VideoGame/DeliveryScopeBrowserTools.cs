@@ -81,6 +81,10 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
                 browser = repository.Browser.Evidence, interactions = repository.Interactions.Evidence });
         return JsonSerializer.Serialize(evidence, Json);
     }
+    internal string ReportEvidence() => JsonSerializer.Serialize(repositories.Select(pair => new {
+        repositoryId = pair.Key, commit = pair.Value.Source.Commit,
+        browser = pair.Value.Browser.Evidence, interactions = pair.Value.Interactions.Evidence
+    }), Json);
     internal WorkExecutionOutcomeV1 WaitOutcome()
     {
         var repository = repositories.Values.First(r => r.Browser.Pending || r.Interactions.Pending);

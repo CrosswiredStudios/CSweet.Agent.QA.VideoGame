@@ -82,6 +82,14 @@ public sealed class GameQaUnattendedTests
         Assert.Contains("Observed actual output",await next.ReadEvidenceAsync(default));
         Assert.Null(await new GameQaJournal(assignment,input,"different-files",context.Platform).ReadReportAsync(default));
         Assert.Null(await new GameQaJournal(assignment,input with {Planning=new(["Validate"],["Changed criterion"])},"exact-files",context.Platform).ReadReportAsync(default));
+
+        await journal.RecordAsync("command",JsonSerializer.Serialize(new {command="cat repositories/assigned/vendor.min.js"}),
+            "MINIFIED_SOURCE_CANARY"+new string('x',20000),default);
+        await journal.RecordAsync("command",JsonSerializer.Serialize(new {command="npm --prefix repositories/assigned run verify"}),
+            "Observed verification header\n"+new string('x',20000)+"\nFAIL actual candidate check\nexit_code: 1",default);
+        var packet=await journal.ReadReportEvidenceAsync(default);
+        Assert.DoesNotContain("MINIFIED_SOURCE_CANARY",packet);Assert.Contains("FAIL actual candidate check",packet);
+        Assert.Contains("exit_code: 1",packet);Assert.True(packet.Length<3000);
     }
 
     private sealed class Client(bool staleToolChoice):IChatClient

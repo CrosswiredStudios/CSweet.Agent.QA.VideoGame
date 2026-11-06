@@ -16,7 +16,8 @@ public sealed partial class SpecialistAgent
             var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
                 throw new InvalidOperationException("Configure an approved QA provider."), Settings.GetString("llmModel")));
             return await RunDeliveryScopeAsync(assignment, context, client, token,
-                Math.Min(65_536, ResolveContextWindowTokens(Settings)), Math.Min(8_192, ResolveOutputTokens(Settings)));
+                Math.Min(65_536, ResolveContextWindowTokens(Settings)), Math.Min(8_192, ResolveOutputTokens(Settings)),
+                Math.Min(32_768, ResolveOutputTokens(Settings)));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -24,7 +25,8 @@ public sealed partial class SpecialistAgent
     }
 
     internal static async Task<AgentWorkResult> RunDeliveryScopeAsync(WorkExecutionAssignment assignment,
-        AgentRuntimeContext context, IChatClient client, CancellationToken token, int contextTokens = 65_536, int outputTokens = 8_192)
+        AgentRuntimeContext context, IChatClient client, CancellationToken token, int contextTokens = 65_536, int outputTokens = 8_192,
+        int reportOutputTokens = 32_768)
     {
         try
         {
@@ -61,7 +63,8 @@ public sealed partial class SpecialistAgent
             var report = await journal.ReadResumeReportAsync(token);
             if (report is null)
             {
-                try { await harness.RunAsync(handoff, session, null, reportBudget.Token); }
+                AgentResponse? evaluation = null;
+                try { evaluation = await harness.RunAsync(handoff, session, null, reportBudget.Token); }
                 catch (Exception error) when (reportBudget.IsReportCompletion(error, token) || reportBudget.IsComputeCompletion(error, token)) { }
                 catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested)
                 { throw new InvalidOperationException(reportBudget.FailureMessage); }
@@ -72,12 +75,12 @@ public sealed partial class SpecialistAgent
                     if (browsers.Pending) return AgentWorkResult.Success(browsers.WaitOutcome());
                 }
                 if (reportBudget.AcceptedReport is null)
-                    await GameQaFinalization.RunAsync(client, reportTool, journal.CreateReadTool(),
+                    await GameQaFinalization.RunAsync(client, reportTool,
                         "Submit the report from these actual observations; do not restart validation.\n" +
                         JsonSerializer.Serialize(new { Candidate = candidate, input.Planning }) + "\n" +
-                        await journal.ReadEvidenceAsync(token) + "\n" + await browsers.EvidenceAsync(token),
-                        reportBudget, contextTokens, outputTokens, token,
-                        browsers.Tools(reportBudget.PauseForCompute).Single(t => t.Name == "read_repository_qa_evidence"));
+                        await journal.ReadReportEvidenceAsync(token) + "\n" + browsers.ReportEvidence() + "\n" +
+                        GameQaFinalization.Assessment(evaluation),
+                        reportBudget, reportOutputTokens, token);
                 report = reportBudget.AcceptedReport ?? await GameQaReport.ReadAsync(workspace.Path, token, reportBudget.LastRejection);
             }
             Validate(report);

@@ -111,6 +111,30 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
             JsonSerializer.Serialize(new { totalObservations=keys.Length, earlierObservations=Math.Max(0,keys.Length-24),entries },Json);
     }
 
+    internal async Task<string> ReadReportEvidenceAsync(CancellationToken token)
+    {
+        var index = await ReadIndexAsync(token);
+        var observations = new List<object>();
+        foreach (var key in (index?.Entries ?? []).TakeLast(48))
+        {
+            var receipt = (await platform.ReadOperatingStateAsync<Receipt>(key, token))?.Payload;
+            if (receipt?.Kind != "command") continue;
+            var entry = await ReadEntryAsync(key, token);
+            string? command = null;
+            try { using var request = JsonDocument.Parse(entry.Request); command = request.RootElement.GetProperty("command").GetString(); }
+            catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException) { }
+            // Long script bodies and minified-file dumps stay in the journal, never in report prompts.
+            if (command is null || command.Length > 1600) continue;
+            var output = entry.Result.ValueKind == JsonValueKind.String ? entry.Result.GetString() ?? "" : entry.Result.GetRawText();
+            if (output.Length > 8000 && !System.Text.RegularExpressions.Regex.IsMatch(command, @"\bnpm\b")) continue;
+            observations.Add(new { entry.ObservedAt, command, diagnosticExcerpt = ReportExcerpt(output),
+                excerpted = output.Length > 1400, journalKey = key });
+        }
+        return JsonSerializer.Serialize(observations.TakeLast(12), Json);
+    }
+    internal static string ReportExcerpt(string value) => value.Length <= 1400 ? value :
+        value[..650] + "\n[intermediate output retained in journal]\n" + value[^650..];
+
     internal AIFunction CreateReadTool() => AIFunctionFactory.Create(async (int observationIndex,int page,CancellationToken token) => {
         var index=await ReadIndexAsync(token);
         var keys=index is null?[]:ObservationKeys(index);

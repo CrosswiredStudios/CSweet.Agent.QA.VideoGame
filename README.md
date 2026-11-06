@@ -17,7 +17,9 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.5.2`
+- Version: `5.5.3`
+
+Aggregate reporting uses `GameQaJournal.ReadReportEvidenceAsync` for bounded real command excerpts and `GameQaFinalization.Assessment` for bounded public evaluation notes. `GameQaFinalization` sends a report-only structured-response request with no investigation tools or repeated raw evidence pages. Reporting may use up to 32,768 output tokens within the configured ceiling; evaluation remains at 8,192. Large minified source stays in the journal, and failed checks are never erased by packet compaction.
 
 `DeliveryScopeBrowserTools.ExecuteSavedDraftsAsync` finishes the latest source-bound saved browser test before aggregate reporting, using retained request identities for pending work. `GameQaFinalization` reserves four structured-report submissions after its evidence-reading phase so a late schema correction can execute. Code invokes the validated report function from the returned fields; failed tests, unknown execution and unexecuted drafts cannot become a pass. This uses the SDK's existing response-schema transport, without relying on required tool-choice forwarding.
 
