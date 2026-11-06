@@ -17,13 +17,13 @@ candidate. The platform independently rechecks these gates before accepting QA.
 ## Contract
 
 - Package ID: `com.csweet.video-game-qa`
-- Version: `5.5.3`
+- Version: `5.5.4`
 
-Aggregate reporting uses `GameQaJournal.ReadReportEvidenceAsync` for bounded real command excerpts and `GameQaFinalization.Assessment` for bounded public evaluation notes. `GameQaFinalization` sends a report-only structured-response request with no investigation tools or repeated raw evidence pages. Reporting may use up to 32,768 output tokens within the configured ceiling; evaluation remains at 8,192. Large minified source stays in the journal, and failed checks are never erased by packet compaction.
+Aggregate reporting uses `GameQaJournal.ReadReportEvidenceAsync` for bounded real command excerpts and `GameQaFinalization.Assessment` for retained public evaluation notes. `GameQaFinalization` sends a report-only structured-response request with no investigation tools or repeated raw evidence pages. Execution and reporting use the installation's configured model capacity, without smaller task token limits. Report handoffs and previous draft arguments are retained beyond the former 64k/16k character cutoffs. Large minified source stays in the journal, and failed checks are never erased by packet compaction.
 
 `DeliveryScopeBrowserTools.ExecuteSavedDraftsAsync` finishes the latest source-bound saved browser test before aggregate reporting, using retained request identities for pending work. `GameQaFinalization` reserves four structured-report submissions after its evidence-reading phase so a late schema correction can execute. Code invokes the validated report function from the returned fields; failed tests, unknown execution and unexecuted drafts cannot become a pass. This uses the SDK's existing response-schema transport, without relying on required tool-choice forwarding.
 
-Release, Epic and Story quality reviews use `DeliveryScopeBrowserTools` for repository-bound Chromium work and `GameQaJournal` for durable observations. Pending compute returns control to the platform and resumes the same exact-candidate evaluation. `GameQaFinalization` obtains a structured report after an early stop or evaluation iteration limit, using evidence reads and report submission only. Aggregate calls use at most 65,536 context and 8,192 output tokens. The matching platform must accept and reconcile quality-stage `awaiting-compute` outcomes. No extra network permissions are required.
+Release, Epic and Story quality reviews use `DeliveryScopeBrowserTools` for repository-bound Chromium work and `GameQaJournal` for durable observations. Pending compute returns control to the platform and resumes the same exact-candidate evaluation. `GameQaFinalization` obtains a structured report after an early stop or evaluation iteration limit, using evidence reads and report submission only. Aggregate calls retain the configured context and output capacity. Older tool history is compacted only when available model input space fills. The matching platform must accept and reconcile quality-stage `awaiting-compute` outcomes. No extra network permissions are required.
 
 Assigned QA exposes `read_task_discussion` for the current ticket and its declared dependencies.
 It uses the existing typed comment-read grant, reads fresh broker state on each call, and pages

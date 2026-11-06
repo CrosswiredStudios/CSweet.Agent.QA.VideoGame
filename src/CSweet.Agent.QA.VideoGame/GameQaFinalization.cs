@@ -25,21 +25,19 @@ internal static class GameQaFinalization
     internal static string Assessment(AgentResponse? evaluation)
     {
         var notes = evaluation?.Messages.Where(m => m.Role == ChatRole.Assistant).SelectMany(m => m.Contents)
-            .OfType<TextContent>().Select(t => t.Text).Where(t => !string.IsNullOrWhiteSpace(t)).TakeLast(4) ?? [];
+            .OfType<TextContent>().Select(t => t.Text).Where(t => !string.IsNullOrWhiteSpace(t)) ?? [];
         var text = string.Join("\n", notes);
-        return "Evaluation notes (unaccepted observations, not a verdict):\n" + (text.Length <= 8000 ? text : text[^8000..]);
+        return "Evaluation notes (unaccepted observations, not a verdict):\n" + text;
     }
     internal static async Task RunAsync(IChatClient client, AIFunction report,
         string handoff, GameQaReport.CorrectionBudget budget, int output, CancellationToken outer)
     {
         if (budget.AcceptedReport is not null) return;
-        if (handoff.Length > 64_000) throw new InvalidOperationException("The compact QA report packet exceeds its bounded capacity; split the assigned review. No verdict was accepted.");
         // PlatformChatClient carries ResponseSchema, but not ChatToolMode. Request the report
         // fields as structured data and invoke the same validated submission function in code.
         for (var attempt = 0; attempt < 4 && budget.AcceptedReport is null; attempt++)
         {
             var draft = budget.LastDraft?.GetRawText();
-            if (draft?.Length > 16_000) draft = "Earlier report was oversized. Return the compact fields requested above; preserve actual defects.";
             var correction = "\nReturn only report fields matching the supplied schema. Code supplies the source identity and validates submission. " +
                 "A saved test draft is not an execution receipt. Preserve unresolved candidate failures; never invent missing output.\n" +
                 budget.LastRejection?.Message + "\nPrevious report arguments, if any:\n" + draft;

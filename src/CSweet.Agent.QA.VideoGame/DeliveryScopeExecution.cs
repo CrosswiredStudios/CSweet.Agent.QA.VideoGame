@@ -16,8 +16,8 @@ public sealed partial class SpecialistAgent
             var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
                 throw new InvalidOperationException("Configure an approved QA provider."), Settings.GetString("llmModel")));
             return await RunDeliveryScopeAsync(assignment, context, client, token,
-                Math.Min(65_536, ResolveContextWindowTokens(Settings)), Math.Min(8_192, ResolveOutputTokens(Settings)),
-                Math.Min(32_768, ResolveOutputTokens(Settings)));
+                ResolveContextWindowTokens(Settings), ResolveOutputTokens(Settings),
+                ResolveOutputTokens(Settings));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -25,8 +25,8 @@ public sealed partial class SpecialistAgent
     }
 
     internal static async Task<AgentWorkResult> RunDeliveryScopeAsync(WorkExecutionAssignment assignment,
-        AgentRuntimeContext context, IChatClient client, CancellationToken token, int contextTokens = 65_536, int outputTokens = 8_192,
-        int reportOutputTokens = 32_768)
+        AgentRuntimeContext context, IChatClient client, CancellationToken token, int contextTokens = GameQaHarness.MaxContextWindowTokens, int outputTokens = GameQaHarness.MaxOutputTokens,
+        int reportOutputTokens = GameQaHarness.MaxOutputTokens)
     {
         try
         {

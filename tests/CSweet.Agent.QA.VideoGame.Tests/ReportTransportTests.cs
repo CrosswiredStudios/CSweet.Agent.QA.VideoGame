@@ -7,7 +7,7 @@ namespace CSweet.Agent.QA.VideoGame.Tests;
 public sealed class ReportTransportTests
 {
     [Theory]
-    [InlineData(false,8192)] [InlineData(false,32768)] [InlineData(true,32768)]
+    [InlineData(false,8192)] [InlineData(false,32768)] [InlineData(true,32768)] [InlineData(false,128000)]
     public async Task Reserved_report_uses_real_platform_response_schema_and_malformed_json_cannot_become_a_verdict(bool malformed,int outputBudget)
     {
         var root=Path.Combine(Path.GetTempPath(),"qa-report-transport-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
@@ -16,8 +16,10 @@ public sealed class ReportTransportTests
             var text="Evaluation finished; a structured report is still required.";
             if(request.TryGetProperty("responseSchema",out var schema)&&schema.ValueKind==JsonValueKind.Object)
             {
-                structuredCalls++;Assert.Equal("qa_report",request.GetProperty("responseSchemaName").GetString());
-                Assert.Equal(0,request.GetProperty("tools").GetArrayLength());Assert.Equal(outputBudget,request.GetProperty("maxOutputTokens").GetInt32());
+                structuredCalls++;
+                if(outputBudget==128000)Assert.Contains("long-evidence-tail",request.GetProperty("messages")[1].GetProperty("text").GetString());
+                Assert.Equal("qa_report",request.GetProperty("responseSchemaName").GetString());
+                Assert.Equal(0,request.GetProperty("tools").GetArrayLength());Assert.Equal(JsonValueKind.Null,request.GetProperty("maxOutputTokens").ValueKind);
                 Assert.Contains("report",request.GetProperty("messages")[0].GetRawText(),StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("save_qa_test_plan",request.GetRawText());
                 text=malformed?"unparseable report":JsonSerializer.Serialize(new {summary="Observed actual output",passed=false,
@@ -39,7 +41,7 @@ public sealed class ReportTransportTests
             }
             else
             {
-                await GameQaFinalization.RunAsync(client,report,"Assess observed fixture output",budget,outputBudget,default);
+                await GameQaFinalization.RunAsync(client,report,outputBudget==128000?new string('x',70000)+"long-evidence-tail":"Assess observed fixture output",budget,outputBudget,default);
                 Assert.NotNull(budget.AcceptedReport);Assert.False(budget.AcceptedReport.Passed);Assert.Equal(1,structuredCalls);
             }
         }

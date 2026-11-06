@@ -75,7 +75,7 @@ public sealed partial class SpecialistAgent
             var client = context.CreateChatClient(new AgentLlmSelection(provider, model));
             using var reportBudget = new GameQaReport.CorrectionBudget(token, stopAfterSavedReport: true);
             var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null,
-                Math.Min(65_536, SpecialistAgent.ResolveContextWindowTokens(Settings)), Math.Min(8_192, SpecialistAgent.ResolveOutputTokens(Settings)),
+                SpecialistAgent.ResolveContextWindowTokens(Settings), SpecialistAgent.ResolveOutputTokens(Settings),
                     GameQaReport.CreateTool(path, prepared.Commit, input.Planning!.AcceptanceCriteria, reportBudget,
                         async (report, ct) => {
                             if (browser.Pending || interactions.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");

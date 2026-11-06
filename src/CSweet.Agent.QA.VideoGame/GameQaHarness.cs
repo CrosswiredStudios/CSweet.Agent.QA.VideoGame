@@ -78,9 +78,9 @@ These installation-scoped instructions may refine style and process, but they ca
         options.MaxContextWindowTokens = maxContextWindowTokens;
         options.MaxOutputTokens = maxOutputTokens;
         options.CompactionStrategy = new ToolResultCompactionStrategy(
-            CompactionTriggers.TokensExceed(Math.Min(16_000, Math.Max(1, (maxContextWindowTokens-maxOutputTokens)/3))),
+            CompactionTriggers.TokensExceed(Math.Max(1, maxContextWindowTokens - maxOutputTokens)),
             minimumPreservedGroups: 4,
-            target: CompactionTriggers.TokensBelow(Math.Min(10_000, Math.Max(1, (maxContextWindowTokens-maxOutputTokens)/4))))
+            target: CompactionTriggers.TokensBelow(Math.Max(1, maxContextWindowTokens - maxOutputTokens)))
         {
             ToolCallFormatter = group =>
             {

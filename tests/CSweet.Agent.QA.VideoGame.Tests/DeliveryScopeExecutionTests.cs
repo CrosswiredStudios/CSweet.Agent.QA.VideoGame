@@ -85,7 +85,7 @@ public sealed class DeliveryScopeExecutionTests
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,ChatOptions? options=null,
             [EnumeratorCancellation] CancellationToken cancellationToken=default)
         {
-            await Task.Yield(); Assert.InRange(options!.MaxOutputTokens!.Value,1,8192);
+            await Task.Yield(); Assert.Equal(128000, options!.MaxOutputTokens);
             var names=(options.Tools ?? []).OfType<AIFunction>().Select(t=>t.Name).ToArray();
             if(names.Contains("execute_workspace_command")) {
                 Assert.Contains("test_web_build",names);Assert.Contains("test_web_interactions",names);
