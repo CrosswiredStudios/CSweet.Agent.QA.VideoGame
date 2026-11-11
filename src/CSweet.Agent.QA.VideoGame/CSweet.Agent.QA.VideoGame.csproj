@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CSweet.Agent.SDK" Version="5.12.1" />
+    <PackageReference Include="CSweet.Agent.SDK.VideoGame.Contracts" Version="1.0.0" />
     <PackageReference Include="CSweet.WorkManagement.Contracts" Version="5.4.0" />
   </ItemGroup>
   <ItemGroup>
