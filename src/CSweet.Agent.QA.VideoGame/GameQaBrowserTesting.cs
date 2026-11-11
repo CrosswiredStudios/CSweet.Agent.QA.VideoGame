@@ -19,6 +19,8 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
     private BrowserState? state;
     private int cursor;
     internal bool Pending { get; private set; }
+    /// <summary>Set when browser compute cannot run now. QA must stop without a verdict and wait.</summary>
+    internal string? Unavailable { get; private set; }
     internal string Evidence { get; private set; } = "";
     internal bool Failed => state?.Report is { Passed: false };
     internal Guid? OperationId => state?.Pending is not null ? state.OperationId : transfer.PendingOperationId;
@@ -48,6 +50,15 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
     internal AIFunction Tool(Action? onPending=null) => AIFunctionFactory.Create(async (string buildDirectory, IReadOnlyList<int> viewportWidths,
         bool requireWebGl, CancellationToken token) =>
     {
+        // Check readiness before staging a build: missing compute is a wait, never a test result.
+        if (state is null && await BrowserComputeReadiness.UnavailableReasonAsync(assignment.WorkstreamId, context, token) is { } unavailable)
+            Unavailable = unavailable;
+        if (Unavailable is not null)
+        {
+            onPending?.Invoke();
+            return new { pending = false, unavailable = true, evidence = (string?)null, operationId = (Guid?)null,
+                instruction = Unavailable + " Finish this turn now without submit_qa_report or any verdict. Do not report criteria as failed or unverifiable because of this." };
+        }
         if (state is null)
         {
             ValidateWidths(viewportWidths);
@@ -64,8 +75,11 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         else if (!state.Widths.SequenceEqual(viewportWidths) || state.RequireWebGl != requireWebGl)
             throw new InvalidOperationException("Resume the retained browser test with its original viewport and WebGL settings.");
         await AdvanceAsync(token);
-        if(Pending)onPending?.Invoke();
-        return new { pending = Pending, evidence = Evidence, operationId = OperationId,
+        if(Pending || Unavailable is not null)onPending?.Invoke();
+        if (Unavailable is not null)
+            return new { pending = false, unavailable = true, evidence = (string?)null, operationId = (Guid?)null,
+                instruction = Unavailable + " Finish this turn now without submit_qa_report or any verdict." };
+        return new { pending = Pending, unavailable = false, evidence = (string?)Evidence, operationId = OperationId,
             instruction = Pending ? "Compute is running. Finish this turn; the platform resumes QA automatically. Do not poll or claim a browser pass." : "Assess the observed browser results against the exact acceptance criteria." };
     }, "test_web_build", "Test the actual static web build from this assigned source in isolated compute with Playwright and Chromium. First build the project, then supply its workspace-relative output directory (for example dist), accepted viewportWidths (desktop-only normally [1280]) and requireWebGl only if that renderer is required. Source and build hashes are bound by code. Returns pending while transferring/testing; finish the turn without a verdict and QA resumes automatically. Screenshots and traces are retained in the QA evidence journal. This smoke test does not establish gameplay, FPS or device compatibility.");
 
@@ -103,8 +117,12 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         }
         var options = await context.Platform.Compute.GetProjectDefaultsAsync(assignment.WorkstreamId, token);
         if (options is not { State: "Ready", TemplateId: { } template } || options.WorkstreamId != assignment.WorkstreamId ||
-            !options.Features.Contains("browser-testing-v1"))
-            throw new InvalidOperationException($"Browser compute preparation is not ready ({options?.State ?? "unavailable"}; {options?.ErrorCode ?? "browser-testing-v1 unavailable"}). Complete Linux preparation on the project's Compute page before retrying QA. No browser test was queued.");
+            !options.Features.Contains(BrowserComputeReadiness.Feature))
+        {
+            // Retained browser state survives; the platform resumes this same evaluation once compute is ready.
+            Unavailable = BrowserComputeReadiness.Reason(options?.State, options?.ErrorCode, false);
+            return;
+        }
         if (state.EnvironmentId is null)
         {
             var desired = "qa-browser:" + assignment.WorkstreamId.ToString("N");
@@ -116,6 +134,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
         }
         var current = await context.Platform.Compute.ReadAsync(state.EnvironmentId.Value, token);
         if (current.DesiredState != "running" || current.State is "failed" or "destroyed" or "stopped")
+            // A failed environment is not re-provisioned by waiting, so it stays a blocker for a person to recover.
             throw new InvalidOperationException("QA browser compute needs recovery: " + (current.FailureCode ?? current.State));
         // A retained build alone is not queued compute. Only wait after the platform
         // has admitted an environment and its current identity has been checked.

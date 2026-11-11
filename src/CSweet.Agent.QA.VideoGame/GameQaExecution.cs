@@ -51,6 +51,8 @@ public sealed partial class SpecialistAgent
             var browser = new GameQaBrowserTesting(assignment, prepared, journal, context);
             await browser.ResumeAsync(token);
             if (browser.Pending) return AgentWorkResult.Success(browser.WaitOutcome());
+            if (browser.Unavailable is { } resumedUnavailable)
+                return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, resumedUnavailable));
             var interactions = new GameQaInteractionTesting(assignment, prepared, journal, browser, context);
             await interactions.ResumeAsync(token);
             if (interactions.Pending) return AgentWorkResult.Success(interactions.WaitOutcome());
@@ -65,6 +67,11 @@ public sealed partial class SpecialistAgent
                 await prepared.VerifyAsync(assignment, context, token);
                 return AgentWorkResult.Success(await SaveStandaloneQaAsync(assignment, input, savedReport, stateKey, context, token));
             }
+            // Missing browser compute is infrastructure: wait without a model call or verdict, so the ticket never
+            // returns to engineering for it. The platform re-dispatches QA and this check runs again.
+            if (BrowserAcceptance.Required(input.Planning!) && browser.CompletedBuild is null &&
+                await BrowserComputeReadiness.UnavailableReasonAsync(assignment.WorkstreamId, context, token) is { } computeUnavailable)
+                return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, computeUnavailable));
             var earlierEvidence = await journal.ReadEvidenceAsync(token);
             var scripts = new GameQaBrowserScripts(assignment,prepared,journal,context);
             await scripts.RestoreAsync(token);
@@ -79,6 +86,7 @@ public sealed partial class SpecialistAgent
                     GameQaReport.CreateTool(path, prepared.Commit, input.Planning!.AcceptanceCriteria, reportBudget,
                         async (report, ct) => {
                             if (browser.Pending || interactions.Pending) throw new InvalidOperationException("Browser compute is pending; finish this turn without submitting a verdict.");
+                            if (browser.Unavailable is not null) throw new InvalidOperationException("Browser compute is unavailable; finish this turn without a verdict. QA resumes automatically when compute is ready.");
                             if ((browser.Failed || interactions.Failed) && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
                             BrowserAcceptance.Validate(input.Planning!, report, prepared.SourceIdentity, browser.CompletedBuild);
                             await prepared.VerifyAsync(assignment, context, ct); await journal.SaveReportAsync(report, ct);
@@ -93,6 +101,7 @@ public sealed partial class SpecialistAgent
             {
                 response = await harness.RunAsync($"Validate commit {prepared.Commit}.\n" +
                     BrowserAcceptance.Handoff(prepared.Commit, assignment.Candidate?.Repositories.SingleOrDefault()?.TargetBranch ?? delivery.BaseBranch) + "\n" +
+                    BrowserAcceptance.Note(input.Planning!) + "\n" +
                     $"Platform-verified source snapshot: commit {prepared.Commit}, " +
                     $"{prepared.SourceCount} original files checked against the broker-authorized snapshot before this run. " +
                     "Source hashes and current input authority will be checked again after your report. " +
@@ -112,6 +121,7 @@ public sealed partial class SpecialistAgent
             catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested)
             {
                 if (browser.Pending) return AgentWorkResult.Success(browser.WaitOutcome());
+                if (browser.Unavailable is { } exhaustedUnavailable) return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, exhaustedUnavailable));
                 if (interactions.Pending) return AgentWorkResult.Success(interactions.WaitOutcome());
                 throw new InvalidOperationException(reportBudget.FailureMessage);
             }
@@ -120,6 +130,8 @@ public sealed partial class SpecialistAgent
                 await prepared.VerifyAsync(assignment, context, token);
                 return AgentWorkResult.Success(browser.WaitOutcome());
             }
+            if (browser.Unavailable is { } turnUnavailable)
+                return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, turnUnavailable));
             if (interactions.Pending)
             {
                 await prepared.VerifyAsync(assignment, context, token);

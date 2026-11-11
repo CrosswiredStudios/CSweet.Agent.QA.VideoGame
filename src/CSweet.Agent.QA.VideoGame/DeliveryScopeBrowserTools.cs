@@ -14,6 +14,9 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
     private sealed record Repository(GameQaInputWorkspace Source, GameQaJournal Journal,
         GameQaBrowserTesting Browser, GameQaInteractionTesting Interactions, GameQaBrowserScripts Scripts);
     internal bool Pending => repositories.Values.Any(r => r.Browser.Pending || r.Interactions.Pending);
+    /// <summary>Why browser compute cannot run now, if it cannot. QA then waits without a verdict.</summary>
+    internal string? Unavailable => repositories.Values.Select(r => r.Browser.Unavailable).FirstOrDefault(reason => reason is not null);
+    internal bool HasCompletedBuild => repositories.Values.Any(r => r.Browser.CompletedBuild is not null);
 
     internal async Task InitializeAsync(DeliveryCandidateWorkspace workspace, CancellationToken token)
     {
@@ -29,7 +32,7 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
         foreach (var repository in repositories.Values)
         {
             await repository.Browser.ResumeAsync(token);
-            if (repository.Browser.Pending) return;
+            if (repository.Browser.Pending || repository.Browser.Unavailable is not null) return;
             await repository.Interactions.ResumeAsync(token);
             if (repository.Interactions.Pending) return;
             await repository.Scripts.RestoreAsync(token);
@@ -96,6 +99,7 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
     internal void Validate(GameQaOutcome report)
     {
         if (Pending) throw new InvalidOperationException("Browser compute is pending; no aggregate QA verdict is accepted.");
+        if (Unavailable is not null) throw new InvalidOperationException("Browser compute is unavailable; finish without a verdict. QA resumes automatically when compute is ready.");
         if (!report.Passed) return;
         if (repositories.Values.Any(r => r.Browser.Failed || r.Interactions.Failed))
             throw new InvalidOperationException("Retained exact-build browser checks failed; preserve the defects in the report.");

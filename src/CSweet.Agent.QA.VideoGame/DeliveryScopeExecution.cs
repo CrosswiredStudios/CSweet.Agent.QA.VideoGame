@@ -39,6 +39,10 @@ public sealed partial class SpecialistAgent
             var browsers = new DeliveryScopeBrowserTools(assignment, input, context);
             await browsers.InitializeAsync(workspace, token);
             if (browsers.Pending) return AgentWorkResult.Success(browsers.WaitOutcome());
+            // Missing browser compute is infrastructure: wait without a model call or verdict.
+            var unavailable = browsers.Unavailable ?? (BrowserAcceptance.Required(input.Planning!) && !browsers.HasCompletedBuild
+                ? await BrowserComputeReadiness.UnavailableReasonAsync(assignment.WorkstreamId, context, token) : null);
+            if (unavailable is not null) return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, unavailable));
             await using var shell = GameQaHarness.CreateShell(workspace.Path);
             using var reportBudget = new GameQaReport.CorrectionBudget(token, stopAfterSavedReport: true);
             void Validate(GameQaOutcome report) { _ = DeliveryScopeEvidence.Bind(report, candidate); browsers.Validate(report); }
@@ -56,7 +60,8 @@ public sealed partial class SpecialistAgent
                 "Inspect relevant source in small bounded reads. Save a focused plan, execute missing checks, then submit_qa_report immediately. " +
                 "Do not re-audit unrelated full-game requirements. For browser tools choose repositoryId from Candidate and use paths relative to that repository. " +
                 "Browser callbacks resume the SAME source-bound evaluation: reuse retained results and scripts, do not restart completed checks. " +
-                "When browser compute is pending, finish without a report; the platform resumes it. " +
+                "When browser compute is pending or unavailable, finish without a report; the platform resumes it. " +
+                BrowserAcceptance.Note(input.Planning!) + " " +
                 "Missing environment evidence is an unverifiable criterion, never a fabricated pass. " +
                 JsonSerializer.Serialize(new { assignment.Instructions, Candidate = candidate, input.Planning }) +
                 "\n" + await journal.ReadEvidenceAsync(token) + "\n" + await browsers.EvidenceAsync(token);
@@ -66,9 +71,11 @@ public sealed partial class SpecialistAgent
                 AgentResponse? evaluation = null;
                 try { evaluation = await harness.RunAsync(handoff, session, null, reportBudget.Token); }
                 catch (Exception error) when (reportBudget.IsReportCompletion(error, token) || reportBudget.IsComputeCompletion(error, token)) { }
-                catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested)
+                catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested && browsers.Unavailable is null)
                 { throw new InvalidOperationException(reportBudget.FailureMessage); }
+                catch (OperationCanceledException) when (reportBudget.Exhausted && !token.IsCancellationRequested) { }
                 if (browsers.Pending) return AgentWorkResult.Success(browsers.WaitOutcome());
+                if (browsers.Unavailable is { } turnUnavailable) return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, turnUnavailable));
                 if (reportBudget.AcceptedReport is null)
                 {
                     await browsers.ExecuteSavedDraftsAsync(token);

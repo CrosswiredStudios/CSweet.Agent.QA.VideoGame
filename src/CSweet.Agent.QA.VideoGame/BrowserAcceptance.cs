@@ -1,10 +1,34 @@
+using System.Text.Json;
 using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.QA.VideoGame;
 
 internal static class BrowserAcceptance
 {
-    internal static bool Required(WorkItemPlanningSpecification planning)
+    /// <summary>
+    /// A planning declaration is authoritative, so the engineer, the technical reviewer and QA apply one rule.
+    /// The text heuristics only cover tickets planned before declarations existed.
+    /// </summary>
+    internal static bool Required(WorkItemPlanningSpecification planning) =>
+        WorkItemVerifications.IsDeclared(planning) ? WorkItemVerifications.BrowserSmoke(planning) is not null : LegacyRequired(planning);
+
+    internal static bool CanvasRequired(WorkItemPlanningSpecification planning) =>
+        WorkItemVerifications.IsDeclared(planning)
+            ? WorkItemVerifications.BrowserSmoke(planning)?.RequireCanvas == true
+            : System.Text.RegularExpressions.Regex.IsMatch(string.Join("\n", planning.AcceptanceCriteria), @"\b(Phaser|canvas)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>What QA's browser test must cover, stated for the model. Empty for tickets that need none.</summary>
+    internal static string Note(WorkItemPlanningSpecification planning)
+    {
+        if (!Required(planning)) return WorkItemVerifications.IsDeclared(planning)
+            ? "This ticket declares no browser verification; do not fail or block it for missing browser evidence." : "";
+        var declared = WorkItemVerifications.BrowserSmoke(planning);
+        var widths = declared?.ViewportWidths is { Count: > 0 } w ? w : [1280];
+        return $"Browser verification is required: run test_web_build on the built output with viewportWidths {JsonSerializer.Serialize(widths)} " +
+            $"and requireWebGl {(declared?.RequireWebGl == true ? "true" : "false")}" + (CanvasRequired(planning) ? "; every viewport must show a canvas." : ".");
+    }
+
+    private static bool LegacyRequired(WorkItemPlanningSpecification planning)
     {
         var criteria = string.Join("\n", planning.AcceptanceCriteria);
         var context = criteria + "\n" + string.Join("\n", planning.Requirements.Concat(planning.Constraints ?? []));
@@ -19,9 +43,15 @@ internal static class BrowserAcceptance
         if (browser is not { Complete: true, Report.Passed: true } || browser.Commit != report.SourceCommitSha ||
             browser.SourceIdentity != sourceIdentity)
             throw new InvalidOperationException("Browser-visible acceptance needs completed test_web_build evidence for this exact source and build. Static tests, a DOM mock or a claimed screenshot cannot produce a QA pass. Run the browser tool, or report the criterion unverified.");
-        if (System.Text.RegularExpressions.Regex.IsMatch(string.Join("\n", planning.AcceptanceCriteria), @"\b(Phaser|canvas)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) &&
-            (browser.Report.Viewports.Count == 0 || browser.Report.Viewports.Any(x => !x.Canvas)))
+        if (CanvasRequired(planning) && (browser.Report.Viewports.Count == 0 || browser.Report.Viewports.Any(x => !x.Canvas)))
             throw new InvalidOperationException("The accepted canvas criterion needs an observed canvas in every requested viewport; do not substitute a WebGL requirement or a static source check.");
+        if (WorkItemVerifications.BrowserSmoke(planning) is { } declared)
+        {
+            if ((declared.ViewportWidths ?? []).Any(width => browser.Report.Viewports.All(viewport => viewport.Width != width)))
+                throw new InvalidOperationException($"The declared browser verification needs viewports {JsonSerializer.Serialize(declared.ViewportWidths)}; run test_web_build with those widths.");
+            if (declared.RequireWebGl && browser.Report.Viewports.Any(viewport => !viewport.WebGl))
+                throw new InvalidOperationException("The declared browser verification requires WebGL in every viewport; run test_web_build with requireWebGl true.");
+        }
     }
 
     internal static string Handoff(string commit, string target) =>
