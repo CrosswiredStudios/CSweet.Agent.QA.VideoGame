@@ -22,6 +22,8 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
             ? sourceIdentity + ":delivery:" + assignment.ExecutionId.ToString("N") + ":" + assignment.AgentInstallationId + ":" + assignment.OrganizationUserId
             : sourceIdentity }, Json)));
     internal string Key => "game-qa-evidence:" + Identity;
+    /// <summary>Observations kept in the readable index. Older ones roll out; prompts only ever use the newest 48.</summary>
+    internal const int WindowSize = 256;
 
     internal AIFunction Observe(AIFunction function) => new ObservedFunction(function, this);
     internal async Task<int> RecordAsync(string kind, string request, object? result, CancellationToken token)
@@ -43,12 +45,16 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
         var index = await store.MergeAsync<Index>(Key,"video-game.qa-evidence-index.v1",1,current=> {
             if(current is not null && current.Identity!=Identity)throw new InvalidOperationException("QA evidence identity changed.");
             var keys=(current?.Entries??[]).Append(key).Distinct(StringComparer.Ordinal).ToArray();
-            if(keys.Length>256)throw new InvalidOperationException("QA evidence reached 256 observations; preserve the existing journal and split further validation.");
+            // A rolling window, never a stop: observations older than the newest WindowSize leave the index (their receipts
+            // and parts stay stored for audit), and Dropped keeps every observation's index stable.
+            var dropped=current?.Dropped??0;
+            if(keys.Length>WindowSize){dropped+=keys.Length-WindowSize;keys=keys[^WindowSize..];}
             var sameReportAttempt=current?.ReportAttemptId==assignment.AttemptId;
             return new(Identity,keys,kind=="validated-report"?(sameReportAttempt?current?.ReportKey??key:key):current?.ReportKey,
-                kind=="validated-report"?assignment.AttemptId:current?.ReportAttemptId);
+                kind=="validated-report"?assignment.AttemptId:current?.ReportAttemptId,dropped);
         },new Dictionary<string,string>(),key+":index",token);
-        return Array.IndexOf(index.Payload.Entries.ToArray(), key);
+        var position=Array.IndexOf(index.Payload.Entries.ToArray(), key);
+        return position<0?-1:index.Payload.Dropped+position;
     }
     internal Task SaveReportAsync(GameQaOutcome report,CancellationToken token) => RecordAsync("validated-report","",report,token);
     internal async Task<IReadOnlyList<Entry>> ReadScriptDraftsAsync(CancellationToken token)
@@ -101,14 +107,14 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
             var entry=await ReadEntryAsync(key,token); var data=JsonSerializer.Serialize(entry,Json);
             // Full observations remain in the journal. Do not replay script bodies,
             // dependency listings or old browser results into every recovery prompt.
-            entries.Add(new { observationIndex=Array.IndexOf(keys,key),entry.Kind,entry.ObservedAt,
+            entries.Add(new { observationIndex=index.Dropped+Array.IndexOf(keys,key),entry.Kind,entry.ObservedAt,
                 request=entry.Request[..Math.Min(180,entry.Request.Length)], pages=(data.Length+19999)/20000,
                 result=data.Length<=1500 ? entry.Result : (JsonElement?)null,
                 note=data.Length>1500 ? "Full result retained; use read_qa_evidence only for a criterion's missing evidence." : null });
         }
         return "Retained exact-source observations (not a new test or verdict). Current browser receipts follow separately. " +
             "Reuse current exact-source evidence; inspect referenced pages only for unresolved criteria. " +
-            JsonSerializer.Serialize(new { totalObservations=keys.Length, earlierObservations=Math.Max(0,keys.Length-24),entries },Json);
+            JsonSerializer.Serialize(new { totalObservations=index.Dropped+keys.Length, earlierObservations=Math.Max(0,index.Dropped+keys.Length-24),entries },Json);
     }
 
     internal async Task<string> ReadReportEvidenceAsync(CancellationToken token)
@@ -138,9 +144,12 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
     internal AIFunction CreateReadTool() => AIFunctionFactory.Create(async (int observationIndex,int page,CancellationToken token) => {
         var index=await ReadIndexAsync(token);
         var keys=index is null?[]:ObservationKeys(index);
-        if(observationIndex<0 || observationIndex>=keys.Length || page<0)
+        var position=observationIndex-(index?.Dropped??0);
+        if(observationIndex>=0 && position<0 && page>=0)
+            return new EvidencePage(false,0,0,$"Observation {observationIndex} is older than the newest {WindowSize} retained for reading; rely on later observations.");
+        if(position<0 || position>=keys.Length || page<0)
             return new EvidencePage(false,0,0,"Choose an existing observation index and nonnegative page.");
-        var entry=await ReadEntryAsync(keys[observationIndex],token);var data=JsonSerializer.Serialize(entry,Json);
+        var entry=await ReadEntryAsync(keys[position],token);var data=JsonSerializer.Serialize(entry,Json);
         var count=(data.Length+19999)/20000;
         if(page>=count)return new EvidencePage(false,page,count,"Page is outside the retained observation.");
         return new EvidencePage(true,page,count,data.Substring(page*20000,Math.Min(20000,data.Length-page*20000)));
@@ -187,7 +196,7 @@ internal sealed class GameQaJournal(WorkExecutionAssignment assignment, WorkExec
         }
     }
     internal sealed record Entry(string Identity,Guid AttemptId,DateTimeOffset ObservedAt,string Kind,string Request,JsonElement Result);
-    internal sealed record Index(string Identity,IReadOnlyList<string> Entries,string? ReportKey=null,Guid? ReportAttemptId=null);
+    internal sealed record Index(string Identity,IReadOnlyList<string> Entries,string? ReportKey=null,Guid? ReportAttemptId=null,int Dropped=0);
     private sealed record Part(string Identity,string Data);
     private sealed record Receipt(string Identity,int PartCount,string Sha256,string? Kind=null);
     private sealed record EvidencePage(bool Found,int Page,int Pages,string Json);

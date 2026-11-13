@@ -27,6 +27,40 @@ public sealed class GameQaUnattendedTests
     }
 
     [Fact]
+    public async Task A_long_journal_rolls_its_oldest_observations_out_instead_of_stopping_QA()
+    {
+        // Super Awesome Games ticket 34 (2026-11-12): after 33 attempts on one source the journal held 256 observations and
+        // every later attempt blocked on its first command. The journal is a rolling window, never a stop.
+        var states=new Dictionary<string,AgentOperatingStateResponse>();
+        var runtime=new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest,AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (read,_)=>Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(read.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest,AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,(write,_)=>{
+                var response=new AgentOperatingStateResponse(Guid.NewGuid(),write.StateKey,write.SchemaId,write.SchemaVersion,write.Status,
+                    write.SourceRevisions,write.ConditionCodes,write.DecisionFingerprint,write.OpenCommitmentCorrelations,write.AttentionReviewId,
+                    write.Payload,(states.GetValueOrDefault(write.StateKey)?.Revision??0)+1,DateTimeOffset.UtcNow,DateTimeOffset.UtcNow);
+                states[write.StateKey]=response;return Task.FromResult(response);
+            });
+        var assignment=JsonSerializer.Deserialize<WorkExecutionAssignment>("{}")! with {ItemId=Guid.NewGuid(),StageKey="quality",AttemptId=Guid.NewGuid(),PlanningRevision=2};
+        var input=new WorkExecutionInputV1(Guid.NewGuid(),Guid.NewGuid(),2,new(["Validate"],["Observed"]));
+        var context=runtime.CreateContext();var journal=new GameQaJournal(assignment,input,"exact-files",context.Platform);
+        var total=GameQaJournal.WindowSize+44;var last=-1;
+        for(var i=0;i<total;i++) last=await journal.RecordAsync("command",$"{{\"command\":\"echo {i}\"}}",$"output {i}",default);
+        Assert.Equal(total-1,last); // indexes stay absolute and stable
+        var index=(await context.Platform.ReadOperatingStateAsync<GameQaJournal.Index>(journal.Key,default))!.Payload;
+        Assert.Equal(GameQaJournal.WindowSize,index.Entries.Count);Assert.Equal(44,index.Dropped);
+        var brief=await journal.ReadEvidenceAsync(default);
+        Assert.Contains($"\"totalObservations\":{total}",brief);Assert.Contains($"\"observationIndex\":{total-1}",brief);
+        var latest=JsonSerializer.SerializeToElement(await journal.CreateReadTool().InvokeAsync(new AIFunctionArguments{["observationIndex"]=total-1,["page"]=0}));
+        Assert.True(latest.GetProperty("found").GetBoolean());Assert.Contains($"output {total-1}",latest.GetProperty("json").GetString());
+        var old=JsonSerializer.SerializeToElement(await journal.CreateReadTool().InvokeAsync(new AIFunctionArguments{["observationIndex"]=3,["page"]=0}));
+        Assert.False(old.GetProperty("found").GetBoolean());Assert.Contains("older than the newest",old.GetProperty("json").GetString());
+        await journal.SaveReportAsync(new GameQaOutcome(new string('a',40),"Observed",true,[new("actual check",true,0,"passed")],[])
+            {Criteria=[new("Observed",true,"Observed actual output")]},default);
+        Assert.NotNull(await journal.ReadReportAsync(default));
+    }
+
+    [Fact]
     public async Task ObservedCommandsAndValidatedReportSurviveAnotherAttemptButNotAnotherSourceOrPlanning()
     {
         var states=new Dictionary<string,AgentOperatingStateResponse>();
