@@ -98,6 +98,7 @@ public sealed partial class SpecialistAgent
                         interactions.Tool(reportBudget.PauseForCompute), scripts.Tool(),
                         GameQaDiscussion.Tool(assignment, delivery, (request, ct) => context.Platform.Work.ReadCommentsAsync(request, ct)));
             qaOptions.ChatOptions!.Tools!.Add(workingNote.Tool());
+            qaOptions.ChatOptions.Tools.Add(interactions.ScenarioTool(scripts, reportBudget.PauseForCompute));
             var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, qaOptions, token));
             var session = await harness.CreateSessionAsync(token);
             // A retry must execute and write fresh evidence, never accept an old report left in the workspace.
@@ -273,7 +274,8 @@ internal static partial class GameQaExecution
         without submitting a QA report or polling; the platform resumes the same source-bound test from compute events.
         Browser smoke evidence establishes startup and loading only; gameplay, input, FPS and real devices need their own checks.
         How deep to test is set by the ticket: the verification notes in each prompt say which criteria need live interaction
-        evidence. Use test_web_interactions for those, and optionally to settle another criterion you cannot judge from the build,
+        evidence. For those, start with run_scenario_contract (the author's shared scenario run, repeated independently), then use
+        test_web_interactions only where its checks do not really measure a criterion, and optionally to settle another criterion you cannot judge from the build,
         tests and source. Do not test beyond the criteria. Save independent untracked Playwright scripts using
         save_browser_test_script, then submit the returned path. Source-bound drafts are restored after continuation;
         do not rewrite them merely because the workspace path changed. Scripts receive page, context, origin and

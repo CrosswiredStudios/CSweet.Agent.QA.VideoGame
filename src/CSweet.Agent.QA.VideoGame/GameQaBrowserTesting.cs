@@ -41,7 +41,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             throw new InvalidOperationException("Retained browser testing belongs to different source files.");
         if (state.BuildSha256 is not { Length: 64 } || state.BuildSha256.Any(character => character is not (>= 'a' and <= 'f' or >= '0' and <= '9')) ||
             state.BuildBytes is < 1 or > 16 * 1024 * 1024 || state.UploadOffset < 0 || state.UploadOffset > state.BuildBytes ||
-            state.EvidenceOffset < 0 || state.EvidenceOffset > 4 * 1024 * 1024)
+            state.EvidenceOffset < 0)
             throw new InvalidOperationException("Retained browser build identity or transfer bounds are invalid.");
         ValidateWidths(state.Widths);
         await AdvanceAsync(token);
@@ -359,7 +359,7 @@ internal sealed class GameQaBrowserTesting(WorkExecutionAssignment assignment, G
             !report.Viewports.Select(viewport => viewport.Width).SequenceEqual(expected.Widths) ||
             report.Viewports.Any(viewport => viewport.Height != 720 || viewport.Errors is null ||
                 viewport.Passed != (viewport.Errors.Count == 0 && (!expected.RequireWebGl || viewport.Canvas && viewport.WebGl))) ||
-            report.Passed != report.Viewports.All(viewport => viewport.Passed) || report.EvidenceBytes is < 1 or > 4 * 1024 * 1024 ||
+            report.Passed != report.Viewports.All(viewport => viewport.Passed) || report.EvidenceBytes < 1 ||
             report.EvidenceSha256 is not { Length: 64 } || report.EvidenceSha256.Any(character => !Uri.IsHexDigit(character)))
             throw new InvalidOperationException("Browser results do not bind the exact build, viewports and executed checks.");
     }

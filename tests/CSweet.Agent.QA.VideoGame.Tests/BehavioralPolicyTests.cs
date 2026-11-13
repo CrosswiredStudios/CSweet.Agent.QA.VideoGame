@@ -36,7 +36,7 @@ public sealed class BehavioralPolicyTests
         var declared = GameQaBehavioralPolicy.For(Planning([Smoke,
             new(WorkItemVerificationKinds.BrowserInteraction) { CriterionIndexes = [2, 0, 9] }]), Assignment());
         Assert.Equal(new[] { 0, 2 }, declared.InteractionCriteria); // out-of-range indexes are ignored
-        Assert.Equal(3, declared.MaximumRuns); // one per declared criterion plus one correction
+        Assert.Equal(4, declared.MaximumRuns); // the shared scenario run, one per declared criterion, one correction
     }
 
     [Fact]
@@ -147,14 +147,15 @@ public sealed class BehavioralPolicyTests
     }
 
     [Fact]
-    public void Core_instructions_are_engine_neutral_and_the_runner_never_fails_for_evidence_size()
+    public void Core_instructions_are_engine_neutral_and_the_runner_keeps_all_evidence_without_a_size_cap()
     {
         Assert.DoesNotContain("Web Audio", GameQaExecution.Instructions);
         Assert.DoesNotContain("OscillatorNode", GameQaExecution.Instructions);
         Assert.Contains("save_qa_working_note", GameQaExecution.Instructions);
         var runner = GameQaInteractionTesting.Resource("qa-interactions.py");
-        Assert.Contains("omittedEvidence", runner);
-        Assert.DoesNotContain("QA interaction evidence exceeds", runner);
+        Assert.DoesNotContain("exceeds", runner);
+        Assert.DoesNotContain("BUDGET", runner);
+        Assert.Contains("trace.zip", runner);
         Assert.Contains("kind === 'observation'", GameQaInteractionTesting.Resource("qa-interactions.cjs"));
     }
 }

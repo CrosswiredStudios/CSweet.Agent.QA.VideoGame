@@ -33,6 +33,10 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
     /// <summary>Acceptance criteria (zero-based) whose most recent assertion in this stage was satisfied.</summary>
     internal IReadOnlySet<int> SatisfiedCriteria => (state?.CriterionResults ?? []).Where(x => x.Satisfied).Select(x => x.Index).ToHashSet();
     internal bool HasScript(string script) => state?.ScriptSha256 == Hash(Encoding.UTF8.GetBytes(script));
+    /// <summary>The shared browser scenario script (CSweet.Agent.SDK); QA runs it unchanged as its standard first run.</summary>
+    internal static string ScenarioScript => BrowserScenarios.PlaywrightScript;
+    /// <summary>The latest completed shared scenario run, compared with the author's generated observation records.</summary>
+    internal string? ScenarioNote => state?.ScenarioNote;
     internal string Evidence => state is null ? "" :
         (state.HarnessError is {} harness ? "Your latest behavioral run produced no result. This is a test-harness problem, not a product defect: " + harness :
          state.Report is {} report ?
@@ -40,6 +44,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             (report.ScriptError is {} error ? "\nYour test script stopped early (harness problem, not a product defect): " + error : "") +
             "\nThe exact authored test" + ((report.OmittedEvidence?.Count ?? 0) > 0 ? $" and result are retained (omitted to fit the evidence budget: {string.Join(", ", report.OmittedEvidence!)})" :
                 ", screenshot, trace and result are retained") + " in read_qa_evidence." : "") +
+        (state.ScenarioNote is {} scenarios ? "\n" + scenarios : "") +
         (state.Complete ? $"\nBehavioral runs used in this stage: {state.Run} of {policy.MaximumRuns}." : "");
 
     internal async Task ResumeAsync(CancellationToken token)
@@ -101,7 +106,72 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         if(Pending)onPending?.Invoke();
         return new {pending=Pending,budgetSpent=false,evidence=Evidence,instruction=Pending ?
             "Finish the turn without a verdict; compute events resume QA. Do not poll." : CompletedInstruction()};
-    },"test_web_interactions","Run independent Playwright checks against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString, { criterion, kind }). criterion is the zero-based index of the acceptance criterion the check serves; kind is 'assertion' (default: satisfied means the criterion holds as required) or 'observation' (records a measured value and never fails the run). Name checks for what they verify; satisfied=true must always mean 'as required'. Use await page.goto(origin) for server delivery or file:///tmp/build/<relative-output-file> for local-file delivery of this same extracted build. File access outside /tmp/build and external origins remain denied. Use Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate runs in a separate browser realm: outer variables are unavailable. Pass required values in its single serialized object argument. Prefer the application's own observable hooks and UI over its internals. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Up to 24 uniquely named checks. Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Runs are budgeted per stage. Correcting a script does not require a new stage. The result and exact test script are always retained; the screenshot and trace are kept when they fit the evidence budget. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
+    },"test_web_interactions","Run independent Playwright checks against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString, { criterion, kind }). criterion is the zero-based index of the acceptance criterion the check serves; kind is 'assertion' (default: satisfied means the criterion holds as required) or 'observation' (records a measured value and never fails the run). Name checks for what they verify; satisfied=true must always mean 'as required'. Use await page.goto(origin) for server delivery or file:///tmp/build/<relative-output-file> for local-file delivery of this same extracted build. File access outside /tmp/build and external origins remain denied. Use Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate runs in a separate browser realm: outer variables are unavailable. Pass required values in its single serialized object argument. Prefer the application's own observable hooks and UI over its internals. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Up to 24 uniquely named checks. Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Runs are budgeted per stage. Correcting a script does not require a new stage. The result, exact test script, screenshot and trace are retained. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
+
+    /// <summary>
+    /// run_scenario_contract: saves the shared scenario script as an ordinary source-bound draft (so continuation restores
+    /// it) and runs it like any behavioral script on the same production build the author ran.
+    /// </summary>
+    internal AIFunction ScenarioTool(GameQaBrowserScripts scripts, Action? onPending = null) => AIFunctionFactory.Create(async (CancellationToken token) =>
+    {
+        var saved = JsonSerializer.SerializeToElement(await scripts.Tool().InvokeAsync(new AIFunctionArguments { ["script"] = ScenarioScript }, token), Json);
+        var path = saved.GetProperty("testScriptPath").GetString()!;
+        return await Tool(onPending).InvokeAsync(new AIFunctionArguments { ["testScriptPath"] = path }, token);
+    }, "run_scenario_contract",
+        "Run the shared browser scenario contract on the exact build test_web_build tested: it opens the build with ?csweet-scenarios, " +
+        "calls window.csweetScenarios.run(), judges every check from its expected and observed values (a check whose observation cites no " +
+        "emitted event fails), reports one check per acceptance criterion, and compares the run with every observation record's generated " +
+        "csweet:observed section in this source. It is the same runner the author's receipt used. Run it first when the ticket declares " +
+        "browser interaction; it counts as one behavioral run.");
+
+    /// <summary>
+    /// Summarizes a shared scenario run and compares it with every generated observation record in the source, so each
+    /// failed check and each difference from the record reaches the verdict in one round.
+    /// </summary>
+    internal static string DescribeScenarios(ScenarioCapture capture, string sourceRoot)
+    {
+        var text = new StringBuilder("Shared browser scenario run on this exact build (judged by the runner, not the page): ")
+            .Append(BrowserScenarios.Summarize(capture, 5000));
+        var records = ScenarioRecords(sourceRoot);
+        if (records.Count == 0)
+            text.Append("\nNo observation record in this source has a generated csweet:observed section. If a criterion asks for a record of a run, " +
+                "its measured values were written by hand: compare them with this run.");
+        foreach (var (path, recorded) in records)
+        {
+            var differences = BrowserScenarios.Compare(capture, recorded, 20);
+            text.Append($"\nRecord {path}: ").Append(differences.Count == 0
+                ? "its generated section matches this run."
+                : "its generated section differs from this run: " + string.Join(" ", differences));
+        }
+        text.Append("\nReport every failed scenario check and every record difference as findings in this verdict; do not spend another run re-asking them. " +
+            "Also judge whether each check really measures its criterion from emitted events (not from the plan or configuration), and " +
+            "whether hand-written prose in a record contradicts its generated section.");
+        var value = text.ToString();
+        return value.Length <= 9000 ? value : value[..8997] + "...";
+    }
+
+    /// <summary>Observation records with a generated scenario section, bounded and skipping dependency and output trees.</summary>
+    internal static IReadOnlyList<(string Path, ScenarioCapture Capture)> ScenarioRecords(string sourceRoot)
+    {
+        var found = new List<(string, ScenarioCapture)>();
+        var skipped = new HashSet<string>(StringComparer.Ordinal) { ".git", "node_modules", "dist", "build", "test-results", ".csweet", "qa" };
+        var pending = new Stack<string>([sourceRoot]);
+        var visited = 0;
+        while (pending.Count > 0 && visited < 4000 && found.Count < 8)
+        {
+            var directory = pending.Pop();
+            foreach (var child in Directory.EnumerateDirectories(directory))
+                if (!skipped.Contains(Path.GetFileName(child)) && (File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
+            foreach (var file in Directory.EnumerateFiles(directory, "*.md"))
+            {
+                if (++visited > 4000 || new FileInfo(file).Length > 1024 * 1024) continue;
+                var markdown = File.ReadAllText(file);
+                if (BrowserScenarios.ReadRecord(markdown) is { } capture)
+                    found.Add((Path.GetRelativePath(sourceRoot, file).Replace('\\', '/'), capture));
+            }
+        }
+        return found.OrderBy(x => x.Item1, StringComparer.Ordinal).ToArray();
+    }
 
     private string CompletedInstruction() =>
         (state?.HarnessError is not null || state?.Report?.ScriptError is not null
@@ -123,7 +193,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         if(state is null || build is null || state.Identity!=journal.Identity || state.Commit!=source.Commit ||
             state.BuildSha256!=build.BuildSha256 || state.EnvironmentId!=build.EnvironmentId ||
             state.ScriptSha256!=Hash(Encoding.UTF8.GetBytes(state.Script)) || Encoding.UTF8.GetByteCount(state.Script)>12000 ||
-            state.Run <1 || state.Step is <0 or >3 || state.EvidenceOffset is <0 or >4*1024*1024)
+            state.Run <1 || state.Step is <0 or >3 || state.EvidenceOffset < 0)
             throw GameQaDefects.Agent("Behavioral checks no longer bind the exact source, build, script and compute environment.");
     }
     private async Task SaveAsync(CancellationToken token)
@@ -219,10 +289,19 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
                 results[check.Criterion!.Value]=new(check.Criterion.Value,check.Satisfied && report.ScriptError is null,state.Run);
             if(report.Passed!=state.Manifest.Passed||report.Checks.Count!=state.Manifest.CheckCount||report.Errors.Count!=state.Manifest.ErrorCount||
                 report.BrowserVersion!=state.Manifest.BrowserVersion)throw GameQaDefects.Agent("Full behavioral assertions differ from their compute receipt.");
+            string? scenarioNote=null;
+            if(zip.Entries.SingleOrDefault(e=>e.FullName=="scenarios.json") is {} scenarios) {
+                if(scenarios.Length is <1 or >2*1024*1024)throw new InvalidOperationException("The scenario evaluation exceeds its verified bound.");
+                await using var scenarioStream=scenarios.Open();
+                using var scenarioReader=new StreamReader(scenarioStream);
+                var capture=BrowserScenarios.ReadEvaluation(await scenarioReader.ReadToEndAsync(token));
+                scenarioNote=capture is null?"The shared scenario run attached an evaluation QA could not read.":DescribeScenarios(capture,source.Path);
+                await journal.RecordAsync("browser-scenario-comparison","Shared scenario run compared with generated observation records",new{scenarioNote},token);
+            }
             await journal.RecordAsync("browser-check-result","Independent exact-build Playwright assertions",report,token);
             await journal.RecordAsync("browser-check-artifact","evidence.zip (retained artifact; authored test, screenshot, trace, result)",
                 new{ArtifactId=transfer.OperationId,state.Manifest.EvidenceSha256,state.Manifest.EvidenceBytes},token);
-            state=state with{Report=report,Complete=true,Step=3,CriterionResults=results.Values.OrderBy(x=>x.Index).ToArray()};await SaveAsync(token);Pending=false;return;
+            state=state with{Report=report,Complete=true,Step=3,CriterionResults=results.Values.OrderBy(x=>x.Index).ToArray(),ScenarioNote=scenarioNote};await SaveAsync(token);Pending=false;return;
         }
         var command=state.Step switch {
             0=>PrepareCommand(),
@@ -282,7 +361,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             report.Checks.Select(c=>c.Name).Distinct(StringComparer.Ordinal).Count()!=report.Checks.Count||
             report.Checks.Any(c=>c.Kind is not (null or "assertion" or "observation")||c.Criterion is <0)||
             report.Passed!=(report.Checks.Count>0&&report.ScriptError is null&&report.Checks.All(c=>c.Kind=="observation"||c.Satisfied)&&report.Errors.Count==0)||
-            report.EvidenceBytes is <1 or >4*1024*1024||report.EvidenceSha256 is not {Length:64}||report.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
+            report.EvidenceBytes < 1||report.EvidenceSha256 is not {Length:64}||report.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
             throw new InvalidOperationException("Behavioral results do not bind the exact source, build, script and executed assertions.");
     }
     internal static void ValidateReceipt(Receipt receipt,State expected,Guid requestId)
@@ -290,7 +369,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         if(receipt.RequestId!=requestId||receipt.SourceCommitSha!=expected.Commit||receipt.BuildSha256!=expected.BuildSha256||
             receipt.ScriptSha256!=expected.ScriptSha256||string.IsNullOrWhiteSpace(receipt.BrowserVersion)||receipt.CheckCount is <0 or >24||
             receipt.ErrorCount is <0 or >12||receipt.Passed&&(receipt.CheckCount==0||receipt.ErrorCount!=0)||
-            receipt.EvidenceBytes is <1 or >4*1024*1024||receipt.EvidenceSha256 is not{Length:64}||receipt.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
+            receipt.EvidenceBytes < 1||receipt.EvidenceSha256 is not{Length:64}||receipt.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
             throw new InvalidOperationException("Behavioral receipt does not bind the exact source, build, script and evidence archive.");
     }
     /// <summary>
@@ -348,7 +427,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
     }
     internal sealed record State(string Identity,string Commit,string BuildSha256,Guid EnvironmentId,string ScriptSha256,string Script,
         int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null,int EvidenceReadRecoveries=0,
-        string? HarnessError=null,IReadOnlyList<CriterionResult>? CriterionResults=null);
+        string? HarnessError=null,IReadOnlyList<CriterionResult>? CriterionResults=null,string? ScenarioNote=null);
     /// <summary>The most recent assertion about one acceptance criterion in this stage.</summary>
     internal sealed record CriterionResult(int Index,bool Satisfied,int Run);
     internal sealed record Request(long Generation,string Key,ComputeCommand Command);

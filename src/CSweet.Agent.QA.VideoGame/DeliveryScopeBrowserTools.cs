@@ -74,6 +74,11 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
         AIFunctionFactory.Create(async (string repositoryId, string testScriptPath, CancellationToken token) =>
             await Select(repositoryId).Interactions.Tool(onPending).InvokeAsync(new() { ["testScriptPath"] = testScriptPath }, token),
             "test_web_interactions", "Run the saved Playwright test against this repository's completed test_web_build production artifact. Supply assigned repositoryId and repository-relative testScriptPath. Real input/measurements only; at most 24 named checks and 22 seconds. Runs are budgeted per stage. Pending means finish the turn without a verdict; no polling."),
+        AIFunctionFactory.Create(async (string repositoryId, CancellationToken token) =>
+            await Select(repositoryId).Interactions.ScenarioTool(Select(repositoryId).Scripts, onPending).InvokeAsync(new(), token),
+            "run_scenario_contract", "Run the shared browser scenario contract on this repository's completed test_web_build artifact (the author's " +
+            "runner, repeated independently): every check is judged from emitted events and the run is compared with each generated observation record. " +
+            "Supply assigned repositoryId. Counts as one behavioral run."),
         AIFunctionFactory.Create(async (string repositoryId, int observationIndex, int page, CancellationToken token) =>
             await Select(repositoryId).Journal.CreateReadTool().InvokeAsync(new() { ["observationIndex"] = observationIndex, ["page"] = page }, token),
             "read_repository_qa_evidence", "Read a bounded page of this assigned repository's retained browser evidence. Supply repositoryId, observationIndex and page. Evidence is not a QA verdict.")

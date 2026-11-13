@@ -23,7 +23,8 @@ internal sealed record GameQaBehavioralPolicy(int MaximumRuns, int CriterionCoun
     {
         var count = planning.AcceptanceCriteria?.Count ?? 0;
         var interaction = WorkItemVerifications.InteractionCriteria(planning).Where(i => i >= 0 && i < count).Distinct().Order().ToArray();
-        var baseRuns = interaction.Length > 0 ? Math.Min(interaction.Length + 1, MaximumDeclaredRuns)
+        // Declared interaction adds the shared scenario run (run_scenario_contract) to the focused runs.
+        var baseRuns = interaction.Length > 0 ? Math.Min(interaction.Length + 1, MaximumDeclaredRuns) + 1
             : WorkItemVerifications.IsDeclared(planning) ? OptionalRuns : LegacyRuns;
         // Each retry a person or manager granted after this stage stopped is a decision to keep going: one more run.
         var retries = (assignment.PriorOutcomes ?? []).Count(o =>

@@ -50,11 +50,19 @@ async function run(request) {
         throw Error(`check options: criterion is a zero-based acceptance criterion index below ${criteriaCount}; kind is 'assertion' or 'observation'.`);
       checks.push(criterion === undefined && kind === 'assertion' ? { name, satisfied, evidence } : { name, satisfied, evidence, criterion, kind });
     };
+    // attach('scenarios', value): the shared browser scenario evaluation (CSweet.Agent.SDK BrowserScenarios), kept whole
+    // in the evidence archive so QA can compare it with the author's generated observation records.
+    const attach = async (name, value) => {
+      const text = JSON.stringify(value);
+      if (name !== 'scenarios' || typeof text !== 'string' || text.length > 2 * 1024 * 1024)
+        throw Error("attach accepts only 'scenarios' with up to 2 MiB of JSON.");
+      await fs.writeFile('/evidence/scenarios.json', text);
+    };
     try {
       // QA may inspect and drive Playwright in this container. It must load the
       // production bundle from origin; scripts are retained for independent review.
       const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
-      await new AsyncFunction('page', 'context', 'origin', 'check', script)(page, context, origin, check);
+      await new AsyncFunction('page', 'context', 'origin', 'check', 'attach', script)(page, context, origin, check, attach);
     } catch (error) {
       // The authored test failing is a harness problem, not an application defect; page errors stay in errors.
       report.scriptError = String(error?.message ?? error).slice(0, 600);

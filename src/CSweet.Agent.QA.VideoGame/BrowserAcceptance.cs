@@ -39,7 +39,10 @@ internal static class BrowserAcceptance
         var note = policy.InteractionCriteria.Count > 0
             ? "Live interaction evidence is required for these acceptance criteria only (zero-based index: text): " +
               string.Join("; ", policy.InteractionCriteria.Select(i => $"{i}: {criteria[i]}")) +
-              ". Prove each with test_web_interactions assertions that cite it (check(name, satisfied, evidence, { criterion: index })). " +
+              ". First call run_scenario_contract: it repeats the author's shared browser scenario run on this exact build, judges every check " +
+              "from emitted events, reports one assertion per criterion and compares the run with each generated observation record. Report " +
+              "every failed check and every record difference together in this verdict. Use further test_web_interactions scripts only to " +
+              "settle a declared criterion the scenario checks do not really measure; cite it (check(name, satisfied, evidence, { criterion: index })). " +
               "Other criteria need no live interaction evidence; judge them from the build, tests, source and smoke result."
             : WorkItemVerifications.IsDeclared(planning)
                 ? "No acceptance criterion is declared as needing live interaction evidence. test_web_interactions is optional: use it only to settle a specific criterion you cannot judge otherwise."
