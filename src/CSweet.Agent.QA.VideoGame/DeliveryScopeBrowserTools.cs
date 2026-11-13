@@ -11,6 +11,8 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly Dictionary<Guid, Repository> repositories = [];
+    internal GameQaBehavioralPolicy Policy { get; } = GameQaBehavioralPolicy.For(input.Planning!, assignment);
+    internal int RunsUsed => repositories.Values.Sum(r => r.Interactions.RunsUsed);
     private sealed record Repository(GameQaInputWorkspace Source, GameQaJournal Journal,
         GameQaBrowserTesting Browser, GameQaInteractionTesting Interactions, GameQaBrowserScripts Scripts);
     internal bool Pending => repositories.Values.Any(r => r.Browser.Pending || r.Interactions.Pending);
@@ -26,7 +28,7 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
             var journal = new GameQaJournal(assignment, input, source.SourceIdentity, context.Platform);
             var browser = new GameQaBrowserTesting(assignment, source, journal, context);
             repositories.Add(repository.RepositoryId, new(source, journal, browser,
-                new(assignment, source, journal, browser, context), new(assignment, source, journal, context)));
+                new(assignment, source, journal, browser, context, Policy), new(assignment, source, journal, context)));
         }
         // Resume one admitted operation at a time; no model polling or concurrent environment mutations.
         foreach (var repository in repositories.Values)
@@ -68,10 +70,10 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
             "test_web_build", "Test this repository's actual built output using the approved isolated Chromium compute tool. Supply an assigned repositoryId, repository-relative buildDirectory, viewportWidths and requireWebGl. Pending means finish the turn without a verdict; events resume QA. Smoke proves loading only, not gameplay or device compatibility."),
         AIFunctionFactory.Create(async (string repositoryId, string script, CancellationToken token) =>
             await Select(repositoryId).Scripts.Tool().InvokeAsync(new() { ["script"] = script }, token),
-            "save_browser_test_script", "Save an independent Playwright async function body for one assigned repositoryId. It receives page, context, origin and check(name,boolean,evidence). Use actual application APIs and input. page.evaluate needs one serialized argument; outer variables are unavailable. Never substitute an injected shim for application behavior. No source edits or shell quoting. Returns a repository-relative testScriptPath."),
+            "save_browser_test_script", "Save an independent Playwright async function body for one assigned repositoryId. It receives page, context, origin and check(name,boolean,evidence,{criterion,kind}): criterion is the zero-based acceptance criterion the check serves; kind 'assertion' (satisfied means as required) or 'observation' (records a value, never fails). Use actual application APIs and input. page.evaluate needs one serialized argument; outer variables are unavailable. Never substitute an injected shim for application behavior. No source edits or shell quoting. Returns a repository-relative testScriptPath."),
         AIFunctionFactory.Create(async (string repositoryId, string testScriptPath, CancellationToken token) =>
             await Select(repositoryId).Interactions.Tool(onPending).InvokeAsync(new() { ["testScriptPath"] = testScriptPath }, token),
-            "test_web_interactions", "Run the saved Playwright test against this repository's completed test_web_build production artifact. Supply assigned repositoryId and repository-relative testScriptPath. Real input/measurements only; at most 24 named checks and 22 seconds. Pending means finish the turn without a verdict; no polling."),
+            "test_web_interactions", "Run the saved Playwright test against this repository's completed test_web_build production artifact. Supply assigned repositoryId and repository-relative testScriptPath. Real input/measurements only; at most 24 named checks and 22 seconds. Runs are budgeted per stage. Pending means finish the turn without a verdict; no polling."),
         AIFunctionFactory.Create(async (string repositoryId, int observationIndex, int page, CancellationToken token) =>
             await Select(repositoryId).Journal.CreateReadTool().InvokeAsync(new() { ["observationIndex"] = observationIndex, ["page"] = page }, token),
             "read_repository_qa_evidence", "Read a bounded page of this assigned repository's retained browser evidence. Supply repositoryId, observationIndex and page. Evidence is not a QA verdict.")
@@ -103,6 +105,8 @@ internal sealed class DeliveryScopeBrowserTools(WorkExecutionAssignment assignme
         if (!report.Passed) return;
         if (repositories.Values.Any(r => r.Browser.Failed || r.Interactions.Failed))
             throw new InvalidOperationException("Retained exact-build browser checks failed; preserve the defects in the report.");
+        BrowserAcceptance.ValidateInteractions(report, Policy,
+            repositories.Values.SelectMany(r => r.Interactions.SatisfiedCriteria).ToHashSet());
         if (BrowserAcceptance.Required(input.Planning!))
         {
             var browser = repositories.Values.FirstOrDefault(r => r.Browser.CompletedBuild is { Report.Passed: true })

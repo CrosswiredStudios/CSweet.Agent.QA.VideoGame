@@ -36,7 +36,7 @@ public sealed class DeclaredBrowserVerificationTests
 
         BrowserAcceptance.Validate(planning, report, "exact-files", Browser(new(375, 720, true, true, true, []), new(1280, 720, true, true, true, [])));
         Assert.Throws<InvalidOperationException>(() => BrowserAcceptance.Validate(planning, report, "exact-files",
-            Browser(new(1280, 720, true, true, true, []))));
+            Browser(new GameQaBrowserTesting.ViewportResult(1280, 720, true, true, true, []))));
         Assert.Throws<InvalidOperationException>(() => BrowserAcceptance.Validate(planning, report, "exact-files",
             Browser(new(375, 720, true, true, false, []), new(1280, 720, true, true, true, []))));
     }

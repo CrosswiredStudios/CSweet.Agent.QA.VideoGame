@@ -35,27 +35,40 @@ async function run(request) {
     page.on('requestfailed', request => recordError('Request failed: ' + request.url()));
     page.on('response', response => { if (response.status() >= 400) recordError(`HTTP ${response.status()}: ${response.url()}`); });
     page.on('websocket', socket => recordError('Unsupported WebSocket: ' + socket.url()));
-    const check = (name, satisfied, evidence) => {
+    // check(name, satisfied, evidence, { criterion, kind }): criterion is the zero-based acceptance criterion the
+    // check serves; kind 'assertion' (default) means satisfied = the criterion holds, 'observation' records a value
+    // and never fails the run.
+    const criteriaCount = Number.isInteger(request.criteriaCount) && request.criteriaCount > 0 ? request.criteriaCount : 64;
+    const check = (name, satisfied, evidence, options) => {
+      const criterion = options?.criterion, kind = options?.kind ?? 'assertion';
       if (checks.length >= 24 || typeof name !== 'string' || !name.trim() || name.length > 160 ||
           checks.some(item => item.name === name) || typeof satisfied !== 'boolean' ||
           typeof evidence !== 'string' || !evidence.trim() || evidence.length > 1000)
         throw Error('Use at most 24 uniquely named boolean checks with concrete evidence (up to 1000 characters).');
-      checks.push({ name, satisfied, evidence });
+      if ((criterion !== undefined && (!Number.isInteger(criterion) || criterion < 0 || criterion >= criteriaCount)) ||
+          (kind !== 'assertion' && kind !== 'observation'))
+        throw Error(`check options: criterion is a zero-based acceptance criterion index below ${criteriaCount}; kind is 'assertion' or 'observation'.`);
+      checks.push(criterion === undefined && kind === 'assertion' ? { name, satisfied, evidence } : { name, satisfied, evidence, criterion, kind });
     };
     try {
       // QA may inspect and drive Playwright in this container. It must load the
       // production bundle from origin; scripts are retained for independent review.
       const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
       await new AsyncFunction('page', 'context', 'origin', 'check', script)(page, context, origin, check);
-    } catch (error) { recordError(error.message); }
+    } catch (error) {
+      // The authored test failing is a harness problem, not an application defect; page errors stay in errors.
+      report.scriptError = String(error?.message ?? error).slice(0, 600);
+    }
     finally {
       try { await page.screenshot({ path: '/evidence/final.png', timeout: 2000 }); }
       catch (error) { recordError(error.message); }
       await context.tracing.stop({ path: '/evidence/trace.zip' });
       await context.close();
     }
-    if (!checks.length) recordError('No behavioral assertions were executed.');
-    report.passed = checks.length > 0 && checks.every(check => check.satisfied) && errors.length === 0;
+    if (!checks.length && !report.scriptError) report.scriptError = 'The test recorded no checks.';
+    // Observations record values; only assertions decide the run.
+    report.passed = checks.length > 0 && !report.scriptError && errors.length === 0 &&
+      checks.every(check => check.kind === 'observation' || check.satisfied);
   } finally {
     if (browser) await browser.close();
     await new Promise(resolve => server.close(resolve));

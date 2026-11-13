@@ -13,8 +13,9 @@ namespace CSweet.Agent.QA.VideoGame;
 // Browser container commands go through the approved compute callback. The agent
 // never opens a Docker connection or executes Docker in its own runtime.
 internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignment, GameQaInputWorkspace source,
-    GameQaJournal journal, GameQaBrowserTesting browser, AgentRuntimeContext context)
+    GameQaJournal journal, GameQaBrowserTesting browser, AgentRuntimeContext context, GameQaBehavioralPolicy? policy = null)
 {
+    private readonly GameQaBehavioralPolicy policy = policy ?? GameQaBehavioralPolicy.Unbounded;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly string key = StateKey(assignment, journal.Identity);
     internal static string StateKey(WorkExecutionAssignment assignment, string identity) =>
@@ -23,16 +24,40 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
     private readonly GameQaEvidenceTransfer transfer = new(context, journal.Identity);
     private State? state;
     internal bool Pending { get; private set; }
-    internal bool Failed => state?.Report is { Passed: false };
+    /// <summary>The latest run observed a failed assertion or a page error: product evidence, not a harness problem.</summary>
+    internal bool Failed => state?.Report is { Passed: false, ScriptError: null };
+    /// <summary>Why the latest run produced no usable result (QA's own test or its tooling), if it did not.</summary>
+    internal string? HarnessError => state?.HarnessError ?? state?.Report?.ScriptError;
+    internal int RunsUsed => state?.Run ?? 0;
+    internal int MaximumRuns => policy.MaximumRuns;
+    /// <summary>Acceptance criteria (zero-based) whose most recent assertion in this stage was satisfied.</summary>
+    internal IReadOnlySet<int> SatisfiedCriteria => (state?.CriterionResults ?? []).Where(x => x.Satisfied).Select(x => x.Index).ToHashSet();
     internal bool HasScript(string script) => state?.ScriptSha256 == Hash(Encoding.UTF8.GetBytes(script));
-    internal string Evidence => state?.Report is {} report ?
-        "Observed independent Chromium behavior checks (not other browsers/devices):\n" + JsonSerializer.Serialize(report,Json) +
-        "\nThe exact authored test, screenshot, trace and result are retained in read_qa_evidence." : "";
+    internal string Evidence => state is null ? "" :
+        (state.HarnessError is {} harness ? "Your latest behavioral run produced no result. This is a test-harness problem, not a product defect: " + harness :
+         state.Report is {} report ?
+            "Observed independent Chromium behavior checks (not other browsers/devices):\n" + JsonSerializer.Serialize(report,Json) +
+            (report.ScriptError is {} error ? "\nYour test script stopped early (harness problem, not a product defect): " + error : "") +
+            "\nThe exact authored test" + ((report.OmittedEvidence?.Count ?? 0) > 0 ? $" and result are retained (omitted to fit the evidence budget: {string.Join(", ", report.OmittedEvidence!)})" :
+                ", screenshot, trace and result are retained") + " in read_qa_evidence." : "") +
+        (state.Complete ? $"\nBehavioral runs used in this stage: {state.Run} of {policy.MaximumRuns}." : "");
 
     internal async Task ResumeAsync(CancellationToken token)
     {
         state = (await context.Platform.ReadOperatingStateAsync<State>(key,token))?.Payload;
         if(state is null)return;
+        var recovered=false;
+        if(CanRecoverRejectedOutput(state,assignment)||CanRecoverRejectedKey(state,assignment))recovered=true;
+        if(!recovered && !state.Complete && FollowsBlockedAttempt(assignment)) {
+            // A person retried after this stage stopped. Never re-read the same terminal failure: settle the in-flight
+            // run (a pending or successful operation still completes normally) or abandon it without replaying it.
+            try { ValidateBinding(); await AdvanceAsync(token); }
+            catch (InvalidOperationException error) {
+                await AbandonAsync("A retry followed a stopped attempt, and the in-flight behavioral run could not be completed (" +
+                    Excerpt(error.Message,400) + "). It was abandoned, not replayed.",token);
+            }
+            return;
+        }
         ValidateBinding();
         if(CanRecoverRejectedOutput(state,assignment)) {
             await source.VerifyAsync(assignment,context,token);
@@ -61,17 +86,29 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
         var hash = Hash(Encoding.UTF8.GetBytes(script));
         if(state is null || state.ScriptSha256!=hash) {
             if(state is {Complete:false})throw new InvalidOperationException("Resume the existing behavioral test before starting another.");
-            state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:checked((state?.Run??0)+1),Cursor:state?.Cursor??0,RunnerVersion:"3");
+            if((state?.Run??0)>=policy.MaximumRuns)
+                return new {pending=false,budgetSpent=true,evidence=Evidence,instruction=
+                    $"The behavioral run budget for this stage ({policy.MaximumRuns}) is spent. Do not start another script. "+
+                    "Call submit_qa_report now from the evidence you have: pass the criteria your evidence supports, report observed defects as findings, "+
+                    "and mark a criterion unverifiable (with missingEvidence) only if its evidence truly cannot be observed here."};
+            state = new(journal.Identity,source.Commit,build.BuildSha256,build.EnvironmentId!.Value,hash,script,Run:checked((state?.Run??0)+1),Cursor:state?.Cursor??0,RunnerVersion:"3",
+                CriterionResults:state?.CriterionResults);
             await SaveAsync(token);
             await journal.RecordAsync("browser-check-script",testScriptPath,new {state.ScriptSha256,script},token);
         }
         ValidateBinding();
         await AdvanceAsync(token);
         if(Pending)onPending?.Invoke();
-        return new {pending=Pending,evidence=Evidence,instruction=Pending ?
-            "Finish the turn without a verdict; compute events resume QA. Do not poll." :
-            "Assess each actual assertion against its exact criterion. Static checks and mocks do not establish browser behavior."};
-    },"test_web_interactions","Run independent Playwright assertions against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString). Use await page.goto(origin) for server delivery or file:///tmp/build/<relative-output-file> for local-file delivery of this same extracted build. File access outside /tmp/build and external origins remain denied. Use Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate runs in a separate browser realm: outer variables are unavailable. Pass required values in its single serialized object argument. Phaser lifecycle events belong to each scene.sys.events, not game.scene.on; inspect actual version APIs. Do not assume a native OscillatorNode has a state property; measure actual waveform output. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Call check for each observed assertion (up to 24 unique names). Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Correcting a script does not require a new stage. Screenshots, trace, exact test script and result are retained. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
+        return new {pending=Pending,budgetSpent=false,evidence=Evidence,instruction=Pending ?
+            "Finish the turn without a verdict; compute events resume QA. Do not poll." : CompletedInstruction()};
+    },"test_web_interactions","Run independent Playwright checks against the exact production build already tested by test_web_build. Use save_browser_test_script to retain a focused script without shell quoting or policy false matches, then supply its returned testScriptPath. Existing untracked UTF-8 scripts inside this workspace also work. The script is the BODY of an async function receiving page, context, origin and check(name, satisfiedBoolean, concreteEvidenceString, { criterion, kind }). criterion is the zero-based index of the acceptance criterion the check serves; kind is 'assertion' (default: satisfied means the criterion holds as required) or 'observation' (records a measured value and never fails the run). Name checks for what they verify; satisfied=true must always mean 'as required'. Use await page.goto(origin) for server delivery or file:///tmp/build/<relative-output-file> for local-file delivery of this same extracted build. File access outside /tmp/build and external origins remain denied. Use Playwright input/viewport operations and page.evaluate for real browser measurements. page.evaluate runs in a separate browser realm: outer variables are unavailable. Pass required values in its single serialized object argument. Prefer the application's own observable hooks and UI over its internals. You may install page.addInitScript hooks before navigation, then exercise real application APIs/UI. Up to 24 uniquely named checks. Do not mock browser APIs or hard-code success. Node module access is inside the isolated, network-disabled compute container only. Runtime budget is 22 seconds; split longer checks into focused scripts. Runs are budgeted per stage. Correcting a script does not require a new stage. The result and exact test script are always retained; the screenshot and trace are kept when they fit the evidence budget. No QA verdict while pending. Unavailable or untested behavior is satisfied=false, unverifiable=true, never a pass.");
+
+    private string CompletedInstruction() =>
+        (state?.HarnessError is not null || state?.Report?.ScriptError is not null
+            ? "Your test did not run to completion. Fix the script only if a criterion still needs this evidence; otherwise decide from the evidence you have. "
+            : "Assess each actual assertion against its exact criterion. Static checks and mocks do not establish browser behavior. " +
+              "A failed assertion is a product defect unless your own expectation or script was wrong: decide which, report defects as findings, and do not re-run the same question for a different answer. ") +
+        $"Behavioral runs used: {RunsUsed} of {policy.MaximumRuns}.";
 
     internal WorkExecutionOutcomeV1 WaitOutcome() => new(assignment.StageExecutionId,assignment.AttemptId,
         WorkExecutionDispositions.Completed,"awaiting-compute","Independent QA is executing or retaining its exact-build Chromium behavioral checks.",
@@ -87,7 +124,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             state.BuildSha256!=build.BuildSha256 || state.EnvironmentId!=build.EnvironmentId ||
             state.ScriptSha256!=Hash(Encoding.UTF8.GetBytes(state.Script)) || Encoding.UTF8.GetByteCount(state.Script)>12000 ||
             state.Run <1 || state.Step is <0 or >3 || state.EvidenceOffset is <0 or >4*1024*1024)
-            throw new InvalidOperationException("Behavioral checks no longer bind the exact source, build, script and compute environment.");
+            throw GameQaDefects.Agent("Behavioral checks no longer bind the exact source, build, script and compute environment.");
     }
     private async Task SaveAsync(CancellationToken token)
     {
@@ -114,7 +151,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             var operation=state.OperationId is {} id?await context.Platform.Compute.ReadOperationAsync(id,token):await SubmitAsync(request,token);
             if(state.OperationId is null){state=state with{OperationId=operation.Id};await SaveAsync(token);environment=await context.Platform.Compute.ReadAsync(state.EnvironmentId,token);}
             if(operation.EnvironmentId!=state.EnvironmentId || operation.Generation!=request.Generation+1 || environment.Generation!=operation.Generation)
-                throw new InvalidOperationException("Behavioral compute operation authority changed.");
+                throw GameQaDefects.Agent("Behavioral compute operation authority changed.");
             if(operation.Status is "Pending" or "Dispatching" or "Reconciling")return;
             if(operation.Status=="Completed" && operation.Result?.ErrorCode=="outcome-unknown" && state.Step==2) {
                 if(state.EvidenceReadRecoveries>=2)
@@ -129,7 +166,19 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
                 return;
             }
             if(operation.Status!="Completed" || operation.Result is not {ErrorCode:null,Command:{ExitCode:0,TimedOut:false,Truncated:false,ErrorCode:null} output} || output.RequestId!=request.Command.RequestId)
-                throw new InvalidOperationException("Behavioral compute did not complete; no pass or blind test replay is permitted: "+(operation.Result?.ErrorCode??operation.FailureCode??"command failed"));
+            {
+                if(operation.Result?.Command is {} wrong && wrong.RequestId!=request.Command.RequestId)
+                    throw GameQaDefects.Agent("Behavioral compute returned a result for a different request; no verdict or replay is permitted.");
+                var failure="Behavioral compute did not complete; no pass or blind test replay is permitted: "+Describe(operation);
+                // Preparing or running the authored test is QA's own harness: the model gets the reason and may
+                // correct its script (a new script is not a replay). Reading back evidence keeps its bounded recovery.
+                if(state.Step is 0 or 1) {
+                    await journal.RecordAsync("browser-check-harness-error",failure,new{operation.Id,state.Step,state.ScriptSha256},token);
+                    state=state with{Complete=true,Step=3,Request=null,OperationId=null,HarnessError=failure};
+                    await SaveAsync(token);Pending=false;return;
+                }
+                throw new InvalidOperationException(failure);
+            }
             if(state.Step==1) {
                 var receipt=JsonSerializer.Deserialize<Receipt>(output.StandardOutputText,Json)??throw new InvalidOperationException("Missing behavioral receipt.");
                 ValidateReceipt(receipt,state,request.Command.RequestId);
@@ -165,12 +214,15 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             var report=await JsonSerializer.DeserializeAsync<Report>(resultStream,Json,token)??throw new InvalidOperationException("Missing full behavioral report.");
             report=report with{EvidenceSha256=state.Manifest.EvidenceSha256,EvidenceBytes=state.Manifest.EvidenceBytes};
             ValidateReport(report,state,state.Manifest.RequestId);
+            var results=(state.CriterionResults??[]).ToDictionary(x=>x.Index);
+            foreach(var check in report.Checks.Where(c=>c.Criterion is not null && c.Kind!="observation"))
+                results[check.Criterion!.Value]=new(check.Criterion.Value,check.Satisfied && report.ScriptError is null,state.Run);
             if(report.Passed!=state.Manifest.Passed||report.Checks.Count!=state.Manifest.CheckCount||report.Errors.Count!=state.Manifest.ErrorCount||
-                report.BrowserVersion!=state.Manifest.BrowserVersion)throw new InvalidOperationException("Full behavioral assertions differ from their compute receipt.");
+                report.BrowserVersion!=state.Manifest.BrowserVersion)throw GameQaDefects.Agent("Full behavioral assertions differ from their compute receipt.");
             await journal.RecordAsync("browser-check-result","Independent exact-build Playwright assertions",report,token);
             await journal.RecordAsync("browser-check-artifact","evidence.zip (retained artifact; authored test, screenshot, trace, result)",
                 new{ArtifactId=transfer.OperationId,state.Manifest.EvidenceSha256,state.Manifest.EvidenceBytes},token);
-            state=state with{Report=report,Complete=true,Step=3};await SaveAsync(token);Pending=false;return;
+            state=state with{Report=report,Complete=true,Step=3,CriterionResults=results.Values.OrderBy(x=>x.Index).ToArray()};await SaveAsync(token);Pending=false;return;
         }
         var command=state.Step switch {
             0=>PrepareCommand(),
@@ -201,7 +253,7 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             "--mount","type=bind,src="+Root+",dst=/input,readonly","--mount","type=bind,src="+ChecksRoot+",dst=/checks,readonly",
             "--mount","type=bind,src="+ChecksRoot+"/evidence,dst=/evidence","--entrypoint","timeout","csweet/browser-tests:1.64.0",
             "--signal=KILL","26s","python3","/checks/run.py",JsonSerializer.Serialize(new{requestId,sourceCommitSha=source.Commit,
-                buildSha256=state!.BuildSha256,scriptSha256=state.ScriptSha256},Json)};
+                buildSha256=state!.BuildSha256,scriptSha256=state.ScriptSha256,criteriaCount=policy.CriterionCount},Json)};
         return new(requestId,"/usr/bin/docker","/var/lib/csweet-compute/work",arguments,30,8192);
     }
     internal static string Resource(string name)
@@ -228,7 +280,8 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             report.ScriptSha256!=expected.ScriptSha256||string.IsNullOrWhiteSpace(report.BrowserVersion)||report.Checks is null||report.Errors is null||
             report.Checks.Count>24||report.Checks.Any(c=>string.IsNullOrWhiteSpace(c.Name)||string.IsNullOrWhiteSpace(c.Evidence))||
             report.Checks.Select(c=>c.Name).Distinct(StringComparer.Ordinal).Count()!=report.Checks.Count||
-            report.Passed!=(report.Checks.Count>0&&report.Checks.All(c=>c.Satisfied)&&report.Errors.Count==0)||
+            report.Checks.Any(c=>c.Kind is not (null or "assertion" or "observation")||c.Criterion is <0)||
+            report.Passed!=(report.Checks.Count>0&&report.ScriptError is null&&report.Checks.All(c=>c.Kind=="observation"||c.Satisfied)&&report.Errors.Count==0)||
             report.EvidenceBytes is <1 or >4*1024*1024||report.EvidenceSha256 is not {Length:64}||report.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
             throw new InvalidOperationException("Behavioral results do not bind the exact source, build, script and executed assertions.");
     }
@@ -240,6 +293,42 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             receipt.EvidenceBytes is <1 or >4*1024*1024||receipt.EvidenceSha256 is not{Length:64}||receipt.EvidenceSha256.Any(c=>!Uri.IsHexDigit(c)))
             throw new InvalidOperationException("Behavioral receipt does not bind the exact source, build, script and evidence archive.");
     }
+    /// <summary>
+    /// This attempt follows a Blocked attempt of the same stage: a person or manager decided to retry. A transport
+    /// interruption is not such a decision; the same logical attempt resumes instead.
+    /// </summary>
+    internal static bool FollowsBlockedAttempt(WorkExecutionAssignment assignment)
+    {
+        var prior=assignment.PriorOutcomes?.LastOrDefault();
+        if(prior is not {Disposition:WorkExecutionDispositions.Blocked}||prior.StageExecutionId!=assignment.StageExecutionId||prior.AttemptId==assignment.AttemptId)return false;
+        return !(prior.Output.ValueKind==JsonValueKind.Object&&prior.Output.TryGetProperty("qaProcessingError",out var error)&&
+            error.ValueKind==JsonValueKind.String&&error.GetString()!.Contains("(HttpRequestException)",StringComparison.Ordinal));
+    }
+    private async Task AbandonAsync(string reason,CancellationToken token)
+    {
+        await journal.RecordAsync("browser-check-harness-error",reason,new{state!.OperationId,state.Step,state.ScriptSha256},token);
+        state=state with{Complete=true,Step=3,Request=null,OperationId=null,HarnessError=reason};
+        await SaveAsync(token);Pending=false;
+    }
+    /// <summary>The platform's reason a compute operation did not succeed, with the tail of the command's error output.</summary>
+    internal static string Describe(ComputeOperation operation)
+    {
+        var command=operation.Result?.Command;
+        var parts=new List<string>();
+        if(operation.Status!="Completed")parts.Add("operation "+operation.Status+(operation.FailureCode is {} code?" ("+code+")":""));
+        if(operation.Result?.ErrorCode is {} error)parts.Add(error=="outcome-unknown"?"the platform lost this run's result (outcome-unknown); it was not replayed":"error "+error);
+        if(command is not null) {
+            if(command.TimedOut)parts.Add("timed out");
+            else if(command.ExitCode is {} exit && exit!=0)parts.Add("exit code "+exit);
+            if(command.Truncated)parts.Add("output truncated");
+            if(command.ErrorCode is {} commandError)parts.Add("command error "+commandError);
+            var tail=string.Join(" | ",command.StandardErrorText.Split('\n',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries).TakeLast(3));
+            if(tail.Length>0)parts.Add("stderr: "+Excerpt(tail,600));
+        }
+        return parts.Count==0?"command failed":string.Join("; ",parts);
+    }
+    private static string Excerpt(string value,int length)=>value.Length<=length?value:value[..(length-3)]+"...";
+
     internal static bool CanRecoverRejectedOutput(State state,WorkExecutionAssignment assignment)
     {
         var prior=assignment.PriorOutcomes?.LastOrDefault();
@@ -258,11 +347,15 @@ internal sealed class GameQaInteractionTesting(WorkExecutionAssignment assignmen
             error.GetString()=="QA could not invoke compute.execute.v1 (ValidationFailed): JSON Schema validation failed: $.idempotencyKey is too long.";
     }
     internal sealed record State(string Identity,string Commit,string BuildSha256,Guid EnvironmentId,string ScriptSha256,string Script,
-        int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null,int EvidenceReadRecoveries=0);
+        int Run=1,int Cursor=0,int Step=0,Request? Request=null,Guid? OperationId=null,Report? Report=null,int EvidenceOffset=0,bool Complete=false,Receipt? Manifest=null,string? RunnerVersion=null,int EvidenceReadRecoveries=0,
+        string? HarnessError=null,IReadOnlyList<CriterionResult>? CriterionResults=null);
+    /// <summary>The most recent assertion about one acceptance criterion in this stage.</summary>
+    internal sealed record CriterionResult(int Index,bool Satisfied,int Run);
     internal sealed record Request(long Generation,string Key,ComputeCommand Command);
     internal sealed record Report(Guid RequestId,string SourceCommitSha,string BuildSha256,string ScriptSha256,string BrowserVersion,bool Passed,
-        IReadOnlyList<Check> Checks,IReadOnlyList<string> Errors,string EvidenceSha256,int EvidenceBytes);
-    internal sealed record Check(string Name,bool Satisfied,string Evidence);
+        IReadOnlyList<Check> Checks,IReadOnlyList<string> Errors,string EvidenceSha256,int EvidenceBytes,
+        string? ScriptError=null,IReadOnlyList<string>? OmittedEvidence=null);
+    internal sealed record Check(string Name,bool Satisfied,string Evidence,int? Criterion=null,string? Kind=null);
     internal sealed record Receipt(Guid RequestId,string SourceCommitSha,string BuildSha256,string ScriptSha256,string BrowserVersion,bool Passed,
         int CheckCount,int ErrorCount,string EvidenceSha256,int EvidenceBytes);
 }

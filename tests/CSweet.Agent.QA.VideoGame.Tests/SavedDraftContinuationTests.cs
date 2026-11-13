@@ -70,8 +70,10 @@ public sealed class SavedDraftContinuationTests
         if(unknown)operation=operation with {Status="Completed",Result=new(ErrorCode:"outcome-unknown")};
         await using var reconnect=await DeliveryCandidateWorkspace.MaterializeAsync(next,context,default);
         var resumed=new DeliveryScopeBrowserTools(next,input,context);
-        if(unknown)await Assert.ThrowsAsync<InvalidOperationException>(()=>resumed.InitializeAsync(reconnect,default));
-        else {await resumed.InitializeAsync(reconnect,default);Assert.True(resumed.Pending);}
+        await resumed.InitializeAsync(reconnect,default);
+        // A lost result is a harness error the model sees; the same script is never replayed.
+        if(unknown){Assert.False(resumed.Pending);Assert.Contains("not replayed",resumed.ReportEvidence());}
+        else Assert.True(resumed.Pending);
         Assert.Equal(1,submissions);
         var foreign=new DeliveryScopeBrowserTools(next with {ExecutionId=Guid.NewGuid()},input,context);
         await using var other=await DeliveryCandidateWorkspace.MaterializeAsync(next with {ExecutionId=Guid.NewGuid()},context,default);

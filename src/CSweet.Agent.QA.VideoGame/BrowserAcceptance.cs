@@ -28,6 +28,41 @@ internal static class BrowserAcceptance
             $"and requireWebGl {(declared?.RequireWebGl == true ? "true" : "false")}" + (CanvasRequired(planning) ? "; every viewport must show a canvas." : ".");
     }
 
+    /// <summary>
+    /// How deep behavioral testing goes for this ticket, stated for the model: which criteria need live interaction
+    /// evidence, whether behavioral runs are optional, the stage's run budget, and how research spikes are judged.
+    /// </summary>
+    internal static string InteractionNote(WorkItemPlanningSpecification planning, string? workItemTypeKey,
+        GameQaBehavioralPolicy policy, int runsUsed)
+    {
+        var criteria = planning.AcceptanceCriteria ?? [];
+        var note = policy.InteractionCriteria.Count > 0
+            ? "Live interaction evidence is required for these acceptance criteria only (zero-based index: text): " +
+              string.Join("; ", policy.InteractionCriteria.Select(i => $"{i}: {criteria[i]}")) +
+              ". Prove each with test_web_interactions assertions that cite it (check(name, satisfied, evidence, { criterion: index })). " +
+              "Other criteria need no live interaction evidence; judge them from the build, tests, source and smoke result."
+            : WorkItemVerifications.IsDeclared(planning)
+                ? "No acceptance criterion is declared as needing live interaction evidence. test_web_interactions is optional: use it only to settle a specific criterion you cannot judge otherwise."
+                : "This ticket was planned before interaction declarations existed. Use test_web_interactions only where a criterion needs behavior observed in the running build.";
+        if (workItemTypeKey == CSweet.Agent.SDK.VideoGame.Contracts.VideoGameWorkItemTypeKeys.ResearchSpike)
+            note += " This is a research spike: its deliverable is a record of observations. Judge whether the record covers what each criterion says it must capture and does not contradict what you observe, not whether the observed behavior was correct.";
+        var limit = policy.MaximumRuns == int.MaxValue ? "" : $" Behavioral runs used in this stage: {runsUsed} of {policy.MaximumRuns}.";
+        return note + limit;
+    }
+
+    /// <summary>
+    /// A pass on a ticket that declared interaction criteria needs a satisfied live assertion citing each of them,
+    /// from this stage's runs. The latest run must not have failed (enforced separately).
+    /// </summary>
+    internal static void ValidateInteractions(GameQaOutcome report, GameQaBehavioralPolicy policy, IReadOnlySet<int> satisfied)
+    {
+        if (!report.Passed || policy.InteractionCriteria.Count == 0) return;
+        var missing = policy.InteractionCriteria.Where(i => !satisfied.Contains(i)).ToArray();
+        if (missing.Length > 0)
+            throw new InvalidOperationException("These declared interaction criteria have no satisfied test_web_interactions assertion citing them (zero-based): " +
+                string.Join(", ", missing) + ". Prove them with a focused script, or report them unsatisfied or unverifiable.");
+    }
+
     private static bool LegacyRequired(WorkItemPlanningSpecification planning)
     {
         var criteria = string.Join("\n", planning.AcceptanceCriteria);

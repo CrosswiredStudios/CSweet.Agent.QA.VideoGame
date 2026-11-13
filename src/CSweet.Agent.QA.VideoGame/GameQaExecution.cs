@@ -53,7 +53,8 @@ public sealed partial class SpecialistAgent
             if (browser.Pending) return AgentWorkResult.Success(browser.WaitOutcome());
             if (browser.Unavailable is { } resumedUnavailable)
                 return AgentWorkResult.Success(BrowserComputeReadiness.WaitOutcome(assignment, resumedUnavailable));
-            var interactions = new GameQaInteractionTesting(assignment, prepared, journal, browser, context);
+            var policy = GameQaBehavioralPolicy.For(input.Planning!, assignment);
+            var interactions = new GameQaInteractionTesting(assignment, prepared, journal, browser, context, policy);
             await interactions.ResumeAsync(token);
             if (interactions.Pending) return AgentWorkResult.Success(interactions.WaitOutcome());
             var savedReport = prior?.Payload.ValidatedReport ?? await journal.ReadResumeReportAsync(token);
@@ -62,6 +63,7 @@ public sealed partial class SpecialistAgent
             if (standalone && savedReport is not null)
             {
                 BrowserAcceptance.Validate(input.Planning!, savedReport, prepared.SourceIdentity, browser.CompletedBuild);
+                BrowserAcceptance.ValidateInteractions(savedReport, policy, interactions.SatisfiedCriteria);
                 GameQaExecution.ValidateOutcome(savedReport, prepared.Commit);
                 GameQaExecution.ValidateCriterionCoverage(savedReport, input.Planning!.AcceptanceCriteria);
                 await prepared.VerifyAsync(assignment, context, token);
@@ -81,7 +83,8 @@ public sealed partial class SpecialistAgent
             await using var shell = GameQaHarness.CreateShell(path);
             var client = context.CreateChatClient(new AgentLlmSelection(provider, model));
             using var reportBudget = new GameQaReport.CorrectionBudget(token, stopAfterSavedReport: true);
-            var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null,
+            var workingNote = new GameQaWorkingNote(journal, context.Platform);
+            var qaOptions = GameQaHarness.CreateOptions(context.Identity?.DisplayName ?? "Video Game QA", path, shell, null,
                 SpecialistAgent.ResolveContextWindowTokens(Settings), SpecialistAgent.ResolveOutputTokens(Settings),
                     GameQaReport.CreateTool(path, prepared.Commit, input.Planning!.AcceptanceCriteria, reportBudget,
                         async (report, ct) => {
@@ -89,10 +92,13 @@ public sealed partial class SpecialistAgent
                             if (browser.Unavailable is not null) throw new InvalidOperationException("Browser compute is unavailable; finish this turn without a verdict. QA resumes automatically when compute is ready.");
                             if ((browser.Failed || interactions.Failed) && report.Passed) throw new InvalidOperationException("The exact web build failed browser checks; report its defects before requesting another build.");
                             BrowserAcceptance.Validate(input.Planning!, report, prepared.SourceIdentity, browser.CompletedBuild);
+                            BrowserAcceptance.ValidateInteractions(report, policy, interactions.SatisfiedCriteria);
                             await prepared.VerifyAsync(assignment, context, ct); await journal.SaveReportAsync(report, ct);
                         }), journal, browser.Tool(reportBudget.PauseForCompute), prepared.HistoryTool(assignment, context, journal),
                         interactions.Tool(reportBudget.PauseForCompute), scripts.Tool(),
-                        GameQaDiscussion.Tool(assignment, delivery, (request, ct) => context.Platform.Work.ReadCommentsAsync(request, ct))), token));
+                        GameQaDiscussion.Tool(assignment, delivery, (request, ct) => context.Platform.Work.ReadCommentsAsync(request, ct)));
+            qaOptions.ChatOptions!.Tools!.Add(workingNote.Tool());
+            var harness = client.AsHarnessAgent(await CalendarHarness.ConfigureAsync(context, qaOptions, token));
             var session = await harness.CreateSessionAsync(token);
             // A retry must execute and write fresh evidence, never accept an old report left in the workspace.
             GameQaReport.Reset(path);
@@ -102,6 +108,8 @@ public sealed partial class SpecialistAgent
                 response = await harness.RunAsync($"Validate commit {prepared.Commit}.\n" +
                     BrowserAcceptance.Handoff(prepared.Commit, assignment.Candidate?.Repositories.SingleOrDefault()?.TargetBranch ?? delivery.BaseBranch) + "\n" +
                     BrowserAcceptance.Note(input.Planning!) + "\n" +
+                    BrowserAcceptance.InteractionNote(input.Planning!, currentItem.TypeKey, policy, interactions.RunsUsed) + "\n" +
+                    GameQaEngineNotes.For(path, input.Planning!) + await workingNote.PromptAsync(token) + "\n" +
                     $"Platform-verified source snapshot: commit {prepared.Commit}, " +
                     $"{prepared.SourceCount} original files checked against the broker-authorized snapshot before this run. " +
                     "Source hashes and current input authority will be checked again after your report. " +
@@ -144,6 +152,7 @@ public sealed partial class SpecialistAgent
             var outcome = reportBudget.AcceptedReport ?? await GameQaReport.ReadAsync(path, token, reportBudget.LastRejection);
             var verdict = GameQaExecution.ValidateOutcome(outcome, prepared.Commit);
             BrowserAcceptance.Validate(input.Planning!, outcome!, prepared.SourceIdentity, browser.CompletedBuild);
+            BrowserAcceptance.ValidateInteractions(outcome!, policy, interactions.SatisfiedCriteria);
             GameQaExecution.ValidateCriterionCoverage(outcome!, input.Planning!.AcceptanceCriteria);
             await prepared.VerifyAsync(assignment, context, token);
             var needsDecision = GameQaExecution.RequiresDecision(outcome!);
@@ -187,7 +196,7 @@ public sealed partial class SpecialistAgent
             };
             return AgentWorkResult.Success(new WorkExecutionOutcomeV1(assignment.StageExecutionId, assignment.AttemptId,
                 WorkExecutionDispositions.Blocked, "blocked", GameQaExecution.StatusSummary(reason),
-                JsonSerializer.SerializeToElement(new { qaProcessingError = reason }), [], [reason]));
+                JsonSerializer.SerializeToElement(new { qaProcessingError = reason }), [], GameQaDefects.Diagnostics(exception, reason)));
         }
     }
 }
@@ -263,13 +272,26 @@ internal static partial class GameQaExecution
         execution with a DOM mock, HTTP 200 or a Node import. When test_web_build returns pending, finish the turn
         without submitting a QA report or polling; the platform resumes the same source-bound test from compute events.
         Browser smoke evidence establishes startup and loading only; gameplay, input, FPS and real devices need their own checks.
-        Use test_web_interactions for required Chromium behavior: actual Web Audio output/graph measurements, UI/scene transitions,
-        lifecycle hooks, viewport geometry and orientation rejection. Save independent untracked Playwright scripts using
+        How deep to test is set by the ticket: the verification notes in each prompt say which criteria need live interaction
+        evidence. Use test_web_interactions for those, and optionally to settle another criterion you cannot judge from the build,
+        tests and source. Do not test beyond the criteria. Save independent untracked Playwright scripts using
         save_browser_test_script, then submit the returned path. Source-bound drafts are restored after continuation;
         do not rewrite them merely because the workspace path changed. Scripts receive page, context, origin and
         check(name, boolean, evidence). Instrument before navigation with page.addInitScript when needed; exercise the
         actual production application, not a reimplementation or mock. Keep each script within the tool's runtime budget.
-        Cite named observed checks in each criterion. Do not mark runtime behavior satisfied using source inspection,
+        Name each check for what it verifies and cite its criterion; satisfied=true always means "as required". Use kind
+        'observation' for values you record without judging them. Cite named observed checks in each criterion.
+        Criteria that ask for something to be recorded, documented or captured are met by a record that covers it and does
+        not contradict what you observe. Verify the record. If an observation contradicts it, report that once as a finding
+        with your observation; do not keep probing to explain why.
+        A failed assertion in your latest run is a product defect unless your own expectation or script was wrong. Decide
+        which, report defects as findings, and do not re-run the same question hoping for a different answer. A harness
+        error (your script threw, timed out, or the run produced no result) is not a product defect: correct the script
+        once if a criterion still needs it, or decide without it. Behavioral runs are budgeted per stage. When the budget
+        is spent, submit_qa_report from the evidence you have: pass what it supports, report defects as findings, and mark
+        a criterion unverifiable only if its evidence cannot be observed here.
+        Before finishing a turn that waits on compute, save_qa_working_note: settled criteria with their evidence, open
+        questions, and the next run you intend. The next turn starts from that note. Do not mark runtime behavior satisfied using source inspection,
         mocks, a startup smoke pass, or prose saying the live interaction was not run. If a required check cannot be
         observed with these tools, set satisfied=false, unverifiable=true and missingEvidence; never hide it as a nonblocking limitation.
         Inspect and execute relevant build, regression and acceptance tests in this workspace. Do not implement fixes, alter tracked source, commit,
@@ -349,7 +371,7 @@ internal static partial class GameQaExecution
     }
 
     /// <summary>Cross-agent convention: this Blocked outcome needs a manager decision, not a retry.</summary>
-    internal const string DecisionRequiredDiagnostic = "decision-required:v1";
+    internal const string DecisionRequiredDiagnostic = WorkExecutionDiagnostics.DecisionRequired;
 
     /// <summary>
     /// True when the candidate was not passed only because some criteria cannot be evaluated here: every command

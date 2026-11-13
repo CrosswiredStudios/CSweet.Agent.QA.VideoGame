@@ -57,8 +57,16 @@ public sealed class BrowserRecoveryTests
         Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,scenario));
 
     [Fact]
-    public Task Unknown_behavioral_execution_is_not_replayed() =>
-        Assert.ThrowsAsync<InvalidOperationException>(()=>RunRecoveryAsync(false,"interaction-unknown"));
+    public Task Unknown_behavioral_execution_is_not_replayed() => RunRecoveryAsync(false,"interaction-unknown");
+
+    [Fact]
+    public Task A_failed_test_harness_reaches_the_model_and_a_corrected_script_may_run() => RunRecoveryAsync(false,"interaction-harness");
+
+    [Fact]
+    public Task A_spent_run_budget_returns_a_verdict_instruction_without_launching() => RunRecoveryAsync(false,"interaction-budget");
+
+    [Fact]
+    public Task A_retry_after_a_stopped_attempt_abandons_the_failed_run_instead_of_reblocking() => RunRecoveryAsync(false,"interaction-retry");
 
     [Theory]
     [InlineData("interaction-mismatch")]
@@ -229,7 +237,7 @@ public sealed class BrowserRecoveryTests
                     }
                     var receipt=new GameQaInteractionTesting.Receipt(requestId,commit,fullReport.BuildSha256,fullReport.ScriptSha256,
                         fullReport.BrowserVersion,true,1,0,Convert.ToHexStringLower(SHA256.HashData(interactionEvidence)),interactionEvidence.Length);
-                    if(scenario=="interaction-mismatch")receipt=receipt with{CheckCount=2};
+                    if(scenario is "interaction-mismatch" or "interaction-retry")receipt=receipt with{CheckCount=2};
                     if(scenario=="interaction-corrupt-evidence")receipt=receipt with{EvidenceSha256=new('e',64)};
                     if(scenario=="interaction-wrong-script")receipt=receipt with{ScriptSha256=new('e',64)};
                     output=JsonSerializer.Serialize(receipt,json);
@@ -264,6 +272,9 @@ public sealed class BrowserRecoveryTests
                 environment = environment with { Generation = environment.Generation + 1 };
                 var operation = new ComputeOperation(Guid.NewGuid(), environmentId, environment.Generation, "Pending", null,
                     new(Command: new(requestId, 0, false, Encoding.UTF8.GetBytes(output), [])));
+                if (behavior && scenario == "interaction-harness")
+                    operation = operation with { Result = new(Command: new(requestId, 1, false, [],
+                        Encoding.UTF8.GetBytes("Traceback (most recent call last):\n  File \"/checks/run.py\", line 25\nValueError: QA interaction evidence exceeds 4 MiB\n"))) };
                 if ((unknownUpload && probes == 0 && !browser && command!.Arguments.Last().Contains("base64 -d",StringComparison.Ordinal)) ||
                     browser && scenario == "browser" || behavior && scenario=="interaction-unknown") operation=operation with { Result=new(ErrorCode:"outcome-unknown") };
                 if(scenario.Contains("evidence-read-unknown",StringComparison.Ordinal) && command is not null && !browser && !behavior &&
@@ -323,8 +334,15 @@ public sealed class BrowserRecoveryTests
             if (!legacyUpload) Assert.Throws<InvalidOperationException>(() => testing.WaitOutcome());
             if (!preparationReady)
             {
-                await Assert.ThrowsAnyAsync<Exception>(async () => await testing.Tool().InvokeAsync(
-                    new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true }));
+                var unreadyArguments = new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true };
+                // Unready project compute is an infrastructure wait (since 5.6.0): the tool tells the model to finish the turn
+                // without a verdict. Admission or identity errors still fail the call.
+                if (scenario is "unready-pending" or "unready-failed" or "unready-feature")
+                {
+                    await testing.Tool().InvokeAsync(unreadyArguments);
+                    Assert.NotNull(testing.Unavailable);
+                }
+                else await Assert.ThrowsAnyAsync<Exception>(async () => await testing.Tool().InvokeAsync(unreadyArguments));
                 Assert.False(testing.Pending);
                 Assert.Throws<InvalidOperationException>(() => testing.WaitOutcome());
                 Assert.Empty(submissions);
@@ -332,6 +350,8 @@ public sealed class BrowserRecoveryTests
                 preparationReady = true;
                 testing = new GameQaBrowserTesting(assignment with { AttemptId = Guid.NewGuid() }, source, journal, context);
                 await testing.ResumeAsync(default);
+                // Nothing was staged while compute was unready, so the resumed turn starts the test itself.
+                if (scenario is "unready-pending" or "unready-failed" or "unready-feature") await testing.Tool().InvokeAsync(unreadyArguments);
             }
             else if (!legacyUpload)
             await testing.Tool().InvokeAsync(new AIFunctionArguments { ["buildDirectory"] = "dist", ["viewportWidths"] = new[] { 375, 1280 }, ["requireWebGl"] = true });
@@ -353,17 +373,63 @@ public sealed class BrowserRecoveryTests
             if(interactions) {
                 await File.WriteAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"await page.goto(origin); check('audio', true, 'fixture browser measurement');"+
                     (scenario=="interaction-export"?"\n// "+new string('x',11600):""));
-                var behavior=new GameQaInteractionTesting(assignment,source,journal,testing,context);
+                var policy=scenario=="interaction-budget"?new GameQaBehavioralPolicy(1,1,[]):null;
+                var behavior=new GameQaInteractionTesting(assignment,source,journal,testing,context,policy);
                 await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
                 AssertCurrentWait(behavior);
+                var lastAttempt=assignment.AttemptId;
                 for(var turn=0;turn<10 && behavior.Pending;turn++) {
-                    behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context);
-                    try{await behavior.ResumeAsync(default);}catch(IOException) when(lostReply){continue;}
+                    lastAttempt=Guid.NewGuid();
+                    behavior=new GameQaInteractionTesting(assignment with{AttemptId=lastAttempt},source,journal,testing,context,policy);
+                    try{await behavior.ResumeAsync(default);}
+                    catch(IOException) when(lostReply){continue;}
+                    catch(InvalidOperationException stopped) when(scenario=="interaction-retry") {
+                        // The stage blocks with an agent-defect diagnostic. A person then retries: the new attempt must
+                        // not re-read the same failure, and must not replay the run.
+                        Assert.True(GameQaDefects.IsAgentDefect(stopped));
+                        var blocked=new WorkExecutionOutcomeV1(assignment.StageExecutionId,lastAttempt,WorkExecutionDispositions.Blocked,"blocked",
+                            stopped.Message,JsonSerializer.SerializeToElement(new{qaProcessingError=stopped.Message}),[],GameQaDefects.Diagnostics(stopped,stopped.Message));
+                        behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid(),PriorOutcomes=[blocked]},source,journal,testing,context,policy);
+                        await behavior.ResumeAsync(default);
+                        Assert.False(behavior.Pending);Assert.False(behavior.Failed);Assert.Equal(1,interactionLaunches);
+                        Assert.Contains("abandoned, not replayed",behavior.HarnessError);
+                        return;
+                    }
                     AssertCurrentWait(behavior);
                 }
+                if(scenario=="interaction-harness") {
+                    Assert.False(behavior.Pending);Assert.False(behavior.Failed);Assert.Equal(1,interactionLaunches);
+                    Assert.Contains("exit code 1",behavior.HarnessError);Assert.Contains("exceeds 4 MiB",behavior.HarnessError);
+                    Assert.Contains("test-harness problem",behavior.Evidence);
+                    // A corrected script is a new run, not a blind replay.
+                    await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// fewer screenshots");
+                    await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                    for(var turn=0;turn<10 && behavior.Pending;turn++) {
+                        behavior=new GameQaInteractionTesting(assignment with{AttemptId=Guid.NewGuid()},source,journal,testing,context,policy);
+                        await behavior.ResumeAsync(default);
+                    }
+                    Assert.Equal(2,interactionLaunches);Assert.Equal(2,behavior.RunsUsed);
+                    return;
+                }
                 Assert.False(behavior.Pending);Assert.False(behavior.Failed);Assert.Equal(1,interactionLaunches);
+                if(scenario=="interaction-unknown") {
+                    // The lost result reaches the model as a harness error; re-running the same script never replays it.
+                    Assert.Contains("not replayed",behavior.HarnessError);
+                    Assert.Contains("test-harness problem",behavior.Evidence);
+                    await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});
+                    Assert.False(behavior.Pending);Assert.Equal(1,interactionLaunches);
+                    return;
+                }
                 Assert.Contains("Observed independent Chromium behavior",behavior.Evidence);
                 Assert.Contains("browser-check-artifact",await journal.ReadEvidenceAsync(default));
+                if(scenario=="interaction-budget") {
+                    await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// another question");
+                    var spent=JsonSerializer.SerializeToElement(await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"}));
+                    Assert.True(spent.GetProperty("budgetSpent").GetBoolean());
+                    Assert.Contains("submit_qa_report",spent.GetProperty("instruction").GetString());
+                    Assert.False(behavior.Pending);Assert.Equal(1,interactionLaunches);
+                    return;
+                }
                 for(var plan=2;plan<=5;plan++) {
                     await File.AppendAllTextAsync(Path.Combine(source.Path,"checks.cjs"),"\n// A separate focused check plan "+plan);
                     await behavior.Tool().InvokeAsync(new AIFunctionArguments{["testScriptPath"]="checks.cjs"});

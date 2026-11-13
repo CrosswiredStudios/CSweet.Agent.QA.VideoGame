@@ -53,6 +53,8 @@ public sealed partial class SpecialistAgent
                 contextTokens, outputTokens, reportTool, journal);
             options.MaximumIterationsPerRequest = 24;
             foreach (var tool in browsers.Tools(reportBudget.PauseForCompute)) options.ChatOptions!.Tools!.Add(tool);
+            var workingNote = new GameQaWorkingNote(journal, context.Platform);
+            options.ChatOptions!.Tools!.Add(workingNote.Tool());
             var harness = client.AsHarnessAgent(options);
             var session = await harness.CreateSessionAsync(token); GameQaReport.Reset(workspace.Path);
             var handoff = "Validate ONLY the supplied acceptance criteria for this complete immutable candidate. " +
@@ -62,6 +64,8 @@ public sealed partial class SpecialistAgent
                 "Browser callbacks resume the SAME source-bound evaluation: reuse retained results and scripts, do not restart completed checks. " +
                 "When browser compute is pending or unavailable, finish without a report; the platform resumes it. " +
                 BrowserAcceptance.Note(input.Planning!) + " " +
+                BrowserAcceptance.InteractionNote(input.Planning!, null, browsers.Policy, browsers.RunsUsed) + " " +
+                GameQaEngineNotes.For(workspace.Path, input.Planning!) + await workingNote.PromptAsync(token) + " " +
                 "Missing environment evidence is an unverifiable criterion, never a fabricated pass. " +
                 JsonSerializer.Serialize(new { assignment.Instructions, Candidate = candidate, input.Planning }) +
                 "\n" + await journal.ReadEvidenceAsync(token) + "\n" + await browsers.EvidenceAsync(token);
@@ -106,5 +110,6 @@ public sealed partial class SpecialistAgent
     }
     private static AgentWorkResult BlockedDelivery(WorkExecutionAssignment assignment, Exception error) =>
         AgentWorkResult.Success(new WorkExecutionOutcomeV1(assignment.StageExecutionId, assignment.AttemptId,
-            WorkExecutionDispositions.Blocked, "blocked", error.Message, JsonSerializer.SerializeToElement(new { }), [], [error.Message]));
+            WorkExecutionDispositions.Blocked, "blocked", error.Message, JsonSerializer.SerializeToElement(new { }), [],
+            GameQaDefects.Diagnostics(error, error.Message)));
 }
