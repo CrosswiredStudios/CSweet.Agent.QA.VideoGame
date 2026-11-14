@@ -297,3 +297,8 @@ Packages stay local to the job and are never pushed to NuGet. The job summary an
 artifact record origins, source commits and SHA-256 hashes. Private source repositories require the optional
 `CSWEET_DEPENDENCY_READ_TOKEN` Actions secret with read access to the dependency repositories.
 Run `python3 scripts/test-ci-dependencies.py` for the offline resolver regression tests.
+
+Bundled extension text uses LF checkout bytes pinned in `.gitattributes`. After an intentional
+extension edit, refresh the matching SHA-256 in `extensions/video-game/extension.json` and run
+`python3 scripts/verify-bundled-extension.py --self-test`. CI and release jobs verify exact bytes;
+line endings and unexpected source edits cannot bypass provenance checks.
