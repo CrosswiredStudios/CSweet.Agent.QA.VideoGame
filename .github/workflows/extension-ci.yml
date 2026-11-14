@@ -16,10 +16,18 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Verify CI dependency fallback
+        env:
+          CSWEET_RUN_DEPENDENCY_INTEGRATION: '1'
+        run: python3 scripts/test-ci-dependencies.py
+      - name: Prepare pinned C-Sweet dependencies
+        env:
+          CSWEET_DEPENDENCY_TOKEN: ${{ secrets.CSWEET_DEPENDENCY_READ_TOKEN }}
+        run: python3 scripts/prepare-ci-dependencies.py
       - name: Verify bundled extension provenance
         shell: pwsh
         run: ./scripts/verify-extension.ps1
-      - name: Test using only public package dependencies
+      - name: Test using pinned package dependencies
         shell: pwsh
         run: |
           $manifest = Get-Content csweet-plugin.json -Raw | ConvertFrom-Json
@@ -34,3 +42,10 @@ jobs:
           name: agent-packages
           path: .artifacts/packages/*.nupkg
           if-no-files-found: error
+      - name: Upload dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.job }}-ci-dependencies
+          path: .artifacts/ci-dependencies/resolved.json
+          if-no-files-found: ignore

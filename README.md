@@ -287,3 +287,13 @@ Version 5.4.9 uses SDK 5.8.0 exports to retain browser evidence under one durabl
 - Explicitly hand off the assigned immutable commit and actual target branch. Historical main-branch prose cannot substitute a different snapshot; genuine final-main criteria remain pending downstream evidence.
 
 Independent QA, current-source verification and durable compute continuation remain required. Apply through the normal published release and Installed Agents flow.
+
+## CI dependency fallback
+
+GitHub Actions uses the pinned SDK and WorkManagement.Contracts versions from NuGet when available.
+An unpublished version is packed from its reviewed full commit in `build/ci-dependencies.json`.
+Update that commit pin together with any SDK or contracts dependency bump; CI rejects mismatched versions.
+Packages stay local to the job and are never pushed to NuGet. The job summary and dependency-provenance
+artifact record origins, source commits and SHA-256 hashes. Private source repositories require the optional
+`CSWEET_DEPENDENCY_READ_TOKEN` Actions secret with read access to the dependency repositories.
+Run `python3 scripts/test-ci-dependencies.py` for the offline resolver regression tests.
