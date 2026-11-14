@@ -29,7 +29,7 @@ public sealed partial class SpecialistAgent
             ? artifact.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>() : null;
         if (artifact?.Key != scope.RequestFingerprint || proposal is null || proposal.RoleKey != scope.RoleKey ||
             proposal.BoardId != scope.BoardId || proposal.PlanningRevision != scope.PlanningRevision ||
-            proposal.PlanningDigest != scope.PlanningDigest || proposal.AvailableSprintCapacity <= 0 ||
+            proposal.PlanningDigest != scope.PlanningDigest || proposal.AvailableSprintCapacity < 0 ||
             !proposal.Estimates.Select(x => x.WorkItemId).Order().SequenceEqual(scope.WorkItems.Select(x => x.WorkItemId).Order()) ||
             proposal.Estimates.Any(x => x.EstimatePoints <= 0))
             return Task.FromResult(AgentCoordinationTurnResult.Blocked("The Producer estimate proposal is stale, incomplete, or invalid."));
