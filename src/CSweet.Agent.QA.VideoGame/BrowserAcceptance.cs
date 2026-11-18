@@ -15,7 +15,7 @@ internal static class BrowserAcceptance
     internal static bool CanvasRequired(WorkItemPlanningSpecification planning) =>
         WorkItemVerifications.IsDeclared(planning)
             ? WorkItemVerifications.BrowserSmoke(planning)?.RequireCanvas == true
-            : System.Text.RegularExpressions.Regex.IsMatch(string.Join("\n", planning.AcceptanceCriteria), @"\b(Phaser|canvas)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            : System.Text.RegularExpressions.Regex.IsMatch(string.Join("\n", planning.AcceptanceCriteria), @"\bcanvas\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>What QA's browser test must cover, stated for the model. Empty for tickets that need none.</summary>
     internal static string Note(WorkItemPlanningSpecification planning)
@@ -70,7 +70,7 @@ internal static class BrowserAcceptance
     {
         var criteria = string.Join("\n", planning.AcceptanceCriteria);
         var context = criteria + "\n" + string.Join("\n", planning.Requirements.Concat(planning.Constraints ?? []));
-        return System.Text.RegularExpressions.Regex.IsMatch(context, @"\b(browser|Chromium|Phaser|HTML|web)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) &&
+        return System.Text.RegularExpressions.Regex.IsMatch(context, @"\b(browser|Chromium|HTML|web)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) &&
             System.Text.RegularExpressions.Regex.IsMatch(criteria, @"\b(render\w*|display\w*|visible|canvas|loads?|opens?)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 

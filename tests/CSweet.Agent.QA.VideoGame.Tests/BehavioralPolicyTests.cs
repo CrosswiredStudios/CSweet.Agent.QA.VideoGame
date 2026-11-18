@@ -133,17 +133,9 @@ public sealed class BehavioralPolicyTests
     [Fact]
     public void Engine_notes_appear_only_when_the_project_or_criteria_call_for_them()
     {
-        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
-        try
-        {
-            var plain = new WorkItemPlanningSpecification(["Menu"], ["The menu opens"]);
-            Assert.Equal("", GameQaEngineNotes.For(root, plain));
-            File.WriteAllText(Path.Combine(root, "package.json"), "{\"dependencies\":{\"phaser\":\"4.2.1\"}}");
-            Assert.Contains("sys.events", GameQaEngineNotes.For(root, plain));
-            Assert.DoesNotContain("OscillatorNode", GameQaEngineNotes.For(root, plain));
-            Assert.Contains("OscillatorNode", GameQaEngineNotes.For(root, new(["Hit"], ["A brick hit plays a tone"])));
-        }
-        finally { Directory.Delete(root, true); }
+        var plain = new WorkItemPlanningSpecification(["Menu"], ["The menu opens"]);
+        Assert.Empty(GameQaEngineNotes.For(plain));
+        Assert.Contains("OscillatorNode", GameQaEngineNotes.For(new(["Hit"], ["A brick hit plays a tone"])));
     }
 
     [Fact]

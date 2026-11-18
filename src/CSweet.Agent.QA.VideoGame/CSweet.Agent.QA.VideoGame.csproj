@@ -1,12 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>5.9.2</Version>
+    <Version>5.9.3</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CSweet.Agent.SDK" Version="5.28.0" />
-    <PackageReference Include="CSweet.Agent.SDK.VideoGame.Contracts" Version="1.2.0" />
+    <PackageReference Include="CSweet.Agent.SDK.VideoGame.Contracts" Version="2.0.0" />
     <PackageReference Include="CSweet.WorkManagement.Contracts" Version="5.7.0" />
   </ItemGroup>
   <ItemGroup>

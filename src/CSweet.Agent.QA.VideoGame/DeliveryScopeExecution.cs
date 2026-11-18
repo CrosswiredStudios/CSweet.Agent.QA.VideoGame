@@ -65,7 +65,7 @@ public sealed partial class SpecialistAgent
                 "When browser compute is pending or unavailable, finish without a report; the platform resumes it. " +
                 BrowserAcceptance.Note(input.Planning!) + " " +
                 BrowserAcceptance.InteractionNote(input.Planning!, null, browsers.Policy, browsers.RunsUsed) + " " +
-                GameQaEngineNotes.For(workspace.Path, input.Planning!) + await workingNote.PromptAsync(token) + " " +
+                GameQaEngineNotes.For(input.Planning!) + await workingNote.PromptAsync(token) + " " +
                 "Missing environment evidence is an unverifiable criterion, never a fabricated pass. " +
                 JsonSerializer.Serialize(new { assignment.Instructions, Candidate = candidate, input.Planning }) +
                 "\n" + await journal.ReadEvidenceAsync(token) + "\n" + await browsers.EvidenceAsync(token);
